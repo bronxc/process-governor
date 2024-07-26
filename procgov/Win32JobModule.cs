@@ -285,7 +285,7 @@ static class Win32JobModule
             }
 
             var groupAffinity = calculateGroupAffinity();
-            logger.TraceInformation($"Group affinity number: {groupAffinity.Group}, mask: 0x{groupAffinity.Mask:x}");
+            logger.TraceInformation($"Numba group affinity number: {groupAffinity.Group}, mask: 0x{groupAffinity.Mask:x}");
 
             var size = (uint)Marshal.SizeOf(groupAffinity);
             CheckWin32Result(PInvoke.SetInformationJobObject(job.Handle, JOBOBJECTINFOCLASS.JobObjectGroupInformationEx,

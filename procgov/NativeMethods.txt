@@ -3,11 +3,14 @@
 AdjustTokenPrivileges
 AssignProcessToJobObject
 CloseHandle
+CloseServiceHandle
 CreateIoCompletionPort
 CreateJobObject
 CreateProcess
+CreateService
 DebugActiveProcessStop
 DebugSetProcessKillOnExit
+DeleteService
 DuplicateHandle
 DuplicateTokenEx
 EnumProcessModulesEx
@@ -28,6 +31,8 @@ NtQueryInformationProcess
 OpenJobObject
 OpenProcess
 OpenProcessToken
+OpenSCManager
+OpenService
 ResumeThread
 ReadProcessMemory
 RtlNtStatusToDosError
@@ -84,5 +89,10 @@ JOB_OBJECT_TERMINATE
 MAX_PATH
 PROCESS_CREATION_FLAGS
 PROCESSINFOCLASS
+SC_MANAGER_CONNECT
+SC_MANAGER_CREATE_SERVICE
+SERVICE_ALL_ACCESS
+SERVICE_QUERY_STATUS
+SERVICE_START_TYPE
 WIN32_ERROR
 WAIT_EVENT

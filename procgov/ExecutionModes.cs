@@ -1,10 +1,9 @@
-﻿
-
-using System.Security;
-
-namespace ProcessGovernor;
+﻿namespace ProcessGovernor;
 
 enum ExitBehavior { WaitForJobCompletion, DontWaitForJobCompletion, TerminateJobOnExit };
+
+[Flags]
+enum LaunchConfig { Default = 0, NoGui = 1, Quiet = 2, NoMonitor = 4 }
 
 internal interface IJobTarget;
 
@@ -21,21 +20,22 @@ record RunAsCmdApp(
     IJobTarget JobTarget,
     Dictionary<string, string> Environment,
     List<string> Privileges,
-    bool NoGui,
-    bool Quiet,
-    bool NoMonitor,
+    LaunchConfig LaunchConfig,
     ExitBehavior ExitBehavior) : IExecutionMode;
 
 record RunAsMonitor : IExecutionMode;
 
 record RunAsService : IExecutionMode;
 
-record InstallService(
+record SetupProcessGovernance(
     JobSettings JobSettings,
     Dictionary<string, string> Environment,
-    List<string> Privilegs,
+    List<string> Privileges,
     string ExecutablePath,
-    string UserName,
-    SecureString? Password) : IExecutionMode;
+    string ServiceInstallPath,
+    string ServiceUserName,
+    string? ServiceUserPassword) : IExecutionMode;
 
-record UninstallService(string ExecutablePath) : IExecutionMode;
+record RemoveProcessGovernance(string ExecutablePath, string ServiceInstallPath) : IExecutionMode;
+
+record RemoveAllProcessGovernance(string ServiceInstallPath) : IExecutionMode;

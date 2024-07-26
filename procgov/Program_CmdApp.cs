@@ -13,12 +13,13 @@ static partial class Program
 {
     public static async Task<int> Execute(RunAsCmdApp app, CancellationToken ct)
     {
-        if (app.NoGui)
+        if (app.LaunchConfig.HasFlag(LaunchConfig.NoGui))
         {
             PInvoke.ShowWindow(PInvoke.GetConsoleWindow(), SHOW_WINDOW_CMD.SW_HIDE);
         }
 
-        if (!app.Quiet)
+        var quiet = app.LaunchConfig.HasFlag(LaunchConfig.Quiet);
+        if (!quiet)
         {
             Logger.Listeners.Add(new ConsoleTraceListener());
 
@@ -39,7 +40,8 @@ static partial class Program
 
         using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
 
-        if (!app.NoMonitor)
+        var noMonitor = app.LaunchConfig.HasFlag(LaunchConfig.NoMonitor);
+        if (!noMonitor)
         {
             await SetupMonitorConnection();
         }
@@ -67,7 +69,7 @@ static partial class Program
         uint exitCode = 0;
         if (app.ExitBehavior != ExitBehavior.DontWaitForJobCompletion)
         {
-            if (!app.Quiet)
+            if (!quiet)
             {
                 if (app.ExitBehavior == ExitBehavior.TerminateJobOnExit)
                 {
@@ -86,7 +88,7 @@ static partial class Program
                 cts.CancelAfter((int)app.JobSettings.ClockTimeLimitInMilliseconds);
             }
 
-            if (app.NoMonitor)
+            if (noMonitor)
             {
                 Win32JobModule.WaitForTheJobToComplete(job, cts.Token);
             }
@@ -114,14 +116,14 @@ static partial class Program
             // FIXME: moze lepiej bedzie zrobic ifa na app.NoMonitor i rozdzielic logike na dwa rozne bloki
             string[] assignedJobNames = app.JobTarget switch
             {
-                AttachToProcess { Pids: var pids } when !app.NoMonitor => [.. await GetProcessJobNames(pids)],
+                AttachToProcess { Pids: var pids } when !noMonitor => [.. await GetProcessJobNames(pids)],
                 _ => [.. Enumerable.Repeat("", targetProcesses.Length)], // includes Launch process and Attach to process without monitor
             };
             Debug.Assert(assignedJobNames.Length == targetProcesses.Length);
 
             var jobName = "";
             var jobSettings = app.JobSettings;
-            if (!app.NoMonitor && Array.FindIndex(assignedJobNames, jobName => jobName != "") is var monitoredProcessIndex && monitoredProcessIndex != -1)
+            if (!noMonitor && Array.FindIndex(assignedJobNames, jobName => jobName != "") is var monitoredProcessIndex && monitoredProcessIndex != -1)
             {
                 jobName = assignedJobNames[monitoredProcessIndex];
                 jobSettings = MergeJobSettings(jobSettings, await GetProcessJobSettings(jobName));
@@ -136,7 +138,7 @@ static partial class Program
             var job = jobName != "" ? Win32JobModule.OpenJob(jobName) : Win32JobModule.CreateJob(Win32JobModule.GetNewJobName());
             try
             {
-                if (!app.NoMonitor)
+                if (!noMonitor)
                 {
                     await StartOrUpdateMonitoring();
                 }
@@ -154,7 +156,7 @@ static partial class Program
                     }
                 }
 
-                if (!app.Quiet)
+                if (!quiet)
                 {
                     ShowLimits(jobSettings);
                 }
@@ -294,6 +296,7 @@ static partial class Program
             try { await pipe.ConnectAsync(10, ct); }
             catch
             {
+                // FIXME: should be no gui here
                 using var _ = Process.Start(Environment.ProcessPath!, "--monitor");
 
                 while (!pipe.IsConnected && !ct.IsCancellationRequested)

@@ -30,7 +30,9 @@ static partial class Program
                 RunAsCmdApp em => await Execute(em, cts.Token),
                 RunAsMonitor em => await Execute(em, cts.Token),
                 RunAsService em => Execute(em),
-                // FIXME: InstallService em => await Execute(em),
+                SetupProcessGovernance em => Execute(em),
+                RemoveProcessGovernance em => Execute(em),
+                RemoveAllProcessGovernance em => Execute(em),
                 _ => throw new NotImplementedException(),
             };
         }
@@ -90,6 +92,9 @@ static partial class Program
                    --process-utime=        Kill the process (with -r, also applies to its children) if it exceeds the given user-mode execution time. Add suffix to define the time unit. Valid suffixes are: ms, s, m, h.
                    --job-utime=            Kill the process (with -r, also all its children) if the total user-mode execution time exceed the specified value. Add suffix to define the time unit. Valid suffixes are: ms, s, m, h.
                    --uninstall             Uninstall procgov for a specific process.
+                   --uninstall-all         Uninstall procgov completely (removing all saved process settings)
+                   --service-username      The username for the service account (default: NT AUTHORITY\\SYSTEM).
+                   --service-password      The password for the service account (required for non-system accounts).
                    --enable-privilege=     Enables the specified privileges in the remote process. You may specify multiple privileges by splitting them with commas, for example, 'SeDebugPrivilege,SeLockMemoryPrivilege'
                    --terminate-job-on-exit Terminates the job (and all its processes) when you stop procgov with Ctrl + C.
                 -q|--quiet                 Do not show procgov messages.
@@ -127,7 +132,7 @@ static partial class Program
         {
             var parsedArgs = ParseRawArgs(["newconsole", "r", "recursive", "newconsole", "nogui", "install", "uninstall",
                                 "terminate-job-on-exit", "background", "service", "q", "quiet", "nowait", "v", "verbose",
-                                "nomonitor", "monitor" , "h", "?", "help"], rawArgs);
+                                "nomonitor", "monitor", "uninstall-all" , "h", "?", "help"], rawArgs);
 
             var jobSettings = new JobSettings(
                 parsedArgs.Remove("maxmem", out var v) || parsedArgs.Remove("m", out v) ? ParseMemoryString(v[^1]) : 0,
@@ -150,9 +155,11 @@ static partial class Program
                 throw new ArgumentException("minws and maxws must be set together and be greater than 0");
             }
 
-            var nogui = parsedArgs.Remove("nogui");
-            var quiet = parsedArgs.Remove("q") || parsedArgs.Remove("quiet");
-            var noMonitor = parsedArgs.Remove("nomonitor");
+            LaunchConfig launchConfig = LaunchConfig.Default;
+
+            launchConfig |= parsedArgs.Remove("nogui") ? LaunchConfig.NoGui : 0;
+            launchConfig |= parsedArgs.Remove("q") || parsedArgs.Remove("quiet") ? LaunchConfig.Quiet : 0;
+            launchConfig |= parsedArgs.Remove("nomonitor") ? LaunchConfig.NoMonitor : 0;
 
             var nowait = parsedArgs.Remove("nowait");
             var exitBehavior = parsedArgs.Remove("terminate-job-on-exit") switch
@@ -186,27 +193,38 @@ static partial class Program
             var runAsMonitor = parsedArgs.Remove("monitor");
             var runAsService = parsedArgs.Remove("service");
             var install = parsedArgs.Remove("install");
+            var serviceUserName = install switch
+            {
+                true => parsedArgs.Remove("service-username", out v) && v is [.., var username] ? username : "NT AUTHORITY\\SYSTEM",
+                false => ""
+            };
+            var serviceUserPassword = install switch
+            {
+                true => parsedArgs.Remove("service-password", out v) && v is [.., var password] ? password : null,
+                false => null
+            };
+            var serviceInstallPath = parsedArgs.Remove("service-path", out v) && v is [.., var servicePath] ? servicePath :
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), ServiceName);
             var uninstall = parsedArgs.Remove("uninstall");
+            var uninstallAll = parsedArgs.Remove("uninstall-all");
 
             if (parsedArgs.Count > 0)
             {
                 throw new ArgumentException("unrecognized arguments: " + string.Join(", ", parsedArgs.Keys));
             }
 
-            return (procargs, pids, runAsMonitor, runAsService, install, uninstall) switch
+            return (procargs, pids, runAsMonitor, runAsService, install, uninstall, uninstallAll) switch
             {
-                ([], [], true, false, false, false) => new RunAsMonitor(),
-                ([], [], false, true, false, false) => new RunAsService(),
-                ([var executable], [], false, false, true, false) =>
-                    // FIXME: I should read the username and password from the parameters
-                    new InstallService(jobSettings, environment, privileges, executable, "NT AUTHORITY\\SYSTEM", null),
-                ([var executable], [], false, false, false, true) => new UninstallService(executable),
-                (_, [], false, false, false, false) =>
-                    new RunAsCmdApp(jobSettings, new LaunchProcess(procargs, newConsole), environment, privileges,
-                        nogui, quiet, noMonitor, exitBehavior),
-                ([], _, false, false, false, false) =>
-                    new RunAsCmdApp(jobSettings, new AttachToProcess(pids), environment, privileges,
-                        nogui, quiet, noMonitor, exitBehavior),
+                ([], [], true, false, false, false, false) => new RunAsMonitor(),
+                ([], [], false, true, false, false, false) => new RunAsService(),
+                ([var executable], [], false, false, true, false, false) => new SetupProcessGovernance(
+                    jobSettings, environment, privileges, executable, serviceInstallPath, serviceUserName, serviceUserPassword),
+                ([var executable], [], false, false, false, true, false) => new RemoveProcessGovernance(executable, serviceInstallPath),
+                ([], [], false, false, false, false, true) => new RemoveAllProcessGovernance(serviceInstallPath),
+                (_, [], false, false, false, false, false) =>
+                    new RunAsCmdApp(jobSettings, new LaunchProcess(procargs, newConsole), environment, privileges, launchConfig, exitBehavior),
+                ([], _, false, false, false, false, false) =>
+                    new RunAsCmdApp(jobSettings, new AttachToProcess(pids), environment, privileges, launchConfig, exitBehavior),
                 _ => throw new ArgumentException("invalid arguments provided")
             };
         }

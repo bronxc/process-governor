@@ -100,11 +100,52 @@ public static partial class ProgramTests
                 break;
         }
 
+        switch (Program.ParseArgs(["--install", "--service-username=testu", "--service-password=testp", 
+            "--service-path=C:\\test test", "-m=10M", "test.exe"]))
+        {
+            case SetupProcessGovernance procgov:
+                Assert.That(procgov.JobSettings.MaxProcessMemory, Is.EqualTo(10 * 1024 * 1024));
+                Assert.That(procgov.ExecutablePath, Is.EqualTo("test.exe"));
+                Assert.That(procgov.ServiceUserName, Is.EqualTo("testu"));
+                Assert.That(procgov.ServiceUserPassword, Is.EqualTo("testp"));
+                Assert.That(procgov.ServiceInstallPath, Is.EqualTo("C:\\test test"));
+                break;
+            case ShowHelpAndExit err:
+                Assert.Fail($"Error: {err.ErrorMessage}");
+                break;
+            default:
+                Assert.Fail();
+                break;
+        }
+
+        switch (Program.ParseArgs(["--install", "--service-username=testu", "--service-username=testu2", "-m=10M", "test.exe"]))
+        {
+            case SetupProcessGovernance procgov:
+                Assert.That(procgov.JobSettings.MaxProcessMemory, Is.EqualTo(10 * 1024 * 1024));
+                Assert.That(procgov.ExecutablePath, Is.EqualTo("test.exe"));
+                Assert.That(procgov.ServiceUserName, Is.EqualTo("testu2"));
+                Assert.That(procgov.ServiceUserPassword, Is.Null);
+                break;
+            case ShowHelpAndExit err:
+                Assert.Fail($"Error: {err.ErrorMessage}");
+                break;
+            default:
+                Assert.Fail();
+                break;
+        }
+
         switch (Program.ParseArgs(["--install", "-m=10M", "test.exe"]))
         {
-            case InstallService { JobSettings.MaxProcessMemory: var maxMemory, ExecutablePath: var exePath }:
-                Assert.That(maxMemory, Is.EqualTo(10 * 1024 * 1024));
-                Assert.That(exePath, Is.EqualTo("test.exe"));
+            case SetupProcessGovernance procgov:
+                Assert.That(procgov.JobSettings.MaxProcessMemory, Is.EqualTo(10 * 1024 * 1024));
+                Assert.That(procgov.ExecutablePath, Is.EqualTo("test.exe"));
+                Assert.That(procgov.ServiceUserName, Is.EqualTo("NT AUTHORITY\\SYSTEM"));
+                Assert.That(procgov.ServiceUserPassword, Is.Null);
+                Assert.That(procgov.ServiceInstallPath, Is.EqualTo(
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Program.ServiceName)));
+                break;
+            case ShowHelpAndExit err:
+                Assert.Fail($"Error: {err.ErrorMessage}");
                 break;
             default:
                 Assert.Fail();
@@ -123,8 +164,18 @@ public static partial class ProgramTests
 
         switch (Program.ParseArgs(["--uninstall", @"C:\\temp\\test.exe"]))
         {
-            case UninstallService { ExecutablePath: var exePath }:
+            case RemoveProcessGovernance { ExecutablePath: var exePath }:
                 Assert.That(exePath, Is.SamePath(@"C:\\temp\\test.exe"));
+                break;
+            default:
+                Assert.Fail();
+                break;
+        }
+
+        switch (Program.ParseArgs(["--uninstall-all"]))
+        {
+            case RemoveAllProcessGovernance:
+                Assert.Pass();
                 break;
             default:
                 Assert.Fail();
@@ -299,23 +350,20 @@ public static partial class ProgramTests
         Assert.That(Program.ParseArgs(["-m=10M", "test.exe"]) is RunAsCmdApp
         {
             ExitBehavior: ExitBehavior.WaitForJobCompletion,
-            NoGui: false,
-            NoMonitor: false,
-            Quiet: false
+            LaunchConfig: LaunchConfig.Default
         });
 
         Assert.That(Program.ParseArgs(["-m=10M", "-q", "--nowait", "test.exe"]) is RunAsCmdApp
         {
             ExitBehavior: ExitBehavior.DontWaitForJobCompletion,
-            Quiet: true
+            LaunchConfig: LaunchConfig.Quiet
         });
 
 
         Assert.That(Program.ParseArgs(["-m=10M", "--nogui", "--nomonitor", "--terminate-job-on-exit", "test.exe"]) is RunAsCmdApp
         {
             ExitBehavior: ExitBehavior.TerminateJobOnExit,
-            NoGui: true,
-            NoMonitor: true
+            LaunchConfig: LaunchConfig.NoGui | LaunchConfig.NoMonitor
         });
 
         Assert.That(Program.ParseArgs(["-m=10M", "--terminate-job-on-exit", "--nowait", "test.exe"]) is ShowHelpAndExit

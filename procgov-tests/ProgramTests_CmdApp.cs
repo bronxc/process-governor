@@ -1,7 +1,4 @@
-﻿using MessagePack;
-using NUnit.Framework.Internal.Execution;
-using System;
-using System.Buffers;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -22,9 +19,8 @@ public static partial class ProgramTests
     {
         var exception = Assert.CatchAsync<Win32Exception>(async () =>
         {
-            await Program.Execute(new RunAsCmdApp(new JobSettings(),
-                new LaunchProcess(["____wrong-executable.exe"], false), [], [],
-                false, true, false, ExitBehavior.WaitForJobCompletion), CancellationToken.None);
+            await Program.Execute(new RunAsCmdApp(new JobSettings(), new LaunchProcess(
+                ["____wrong-executable.exe"], false), [], [], LaunchConfig.Quiet, ExitBehavior.WaitForJobCompletion), CancellationToken.None);
         });
         Assert.That(exception?.NativeErrorCode, Is.EqualTo(2));
     }
@@ -44,9 +40,8 @@ public static partial class ProgramTests
             }
         }
 
-        var exitCode = await Program.Execute(new RunAsCmdApp(new JobSettings(),
-                new LaunchProcess(["cmd.exe", "/c", "exit 5"], false), [], [],
-                false, true, false, ExitBehavior.WaitForJobCompletion), cts.Token);
+        var exitCode = await Program.Execute(new RunAsCmdApp(new JobSettings(), new LaunchProcess(
+            ["cmd.exe", "/c", "exit 5"], false), [], [], LaunchConfig.Quiet, ExitBehavior.WaitForJobCompletion), cts.Token);
         Assert.That(exitCode, Is.EqualTo(5));
     }
 
@@ -58,9 +53,8 @@ public static partial class ProgramTests
         using var cmd1 = ProcessModule.CreateSuspendedProcess(["cmd.exe", "/c", "exit 5"], false, []);
         using var cmd2 = ProcessModule.CreateSuspendedProcess(["cmd.exe", "/c", "exit 6"], false, []);
 
-        var runTask = Task.Run(() => Program.Execute(new RunAsCmdApp(new JobSettings(),
-            new AttachToProcess([cmd1.Id, cmd2.Id]), [], [], false, true, true /* no monitor */,
-            ExitBehavior.WaitForJobCompletion), cts.Token));
+        var runTask = Task.Run(() => Program.Execute(new RunAsCmdApp(new JobSettings(), new AttachToProcess(
+            [cmd1.Id, cmd2.Id]), [], [], LaunchConfig.Quiet | LaunchConfig.NoMonitor, ExitBehavior.WaitForJobCompletion), cts.Token));
 
         // give time to start for the job
         await Task.Delay(1000);
@@ -97,71 +91,21 @@ public static partial class ProgramTests
             JobSettings jobSettings = new() { MaxProcessMemory = 1024 * 1024 * 1024 };
 
             await Program.Execute(new RunAsCmdApp(jobSettings, new AttachToProcess([cmd.Id]),
-                [], [], false, true, false, ExitBehavior.DontWaitForJobCompletion), cts.Token);
+                [], [], LaunchConfig.Quiet, ExitBehavior.DontWaitForJobCompletion), cts.Token);
 
-            Assert.That(await GetJobSettingsFromMonitor(cts.Token), Is.EqualTo(jobSettings));
+            Assert.That(await GetJobSettingsFromMonitor(cmd.Id, cts.Token), Is.EqualTo(jobSettings));
 
             jobSettings = jobSettings with { CpuMaxRate = 50 };
             await Program.Execute(new RunAsCmdApp(jobSettings, new AttachToProcess([cmd.Id]),
-                [], [], false, true, false, ExitBehavior.DontWaitForJobCompletion), cts.Token);
+                [], [], LaunchConfig.Quiet, ExitBehavior.DontWaitForJobCompletion), cts.Token);
 
-            Assert.That(await GetJobSettingsFromMonitor(cts.Token), Is.EqualTo(jobSettings));
+            Assert.That(await GetJobSettingsFromMonitor(cmd.Id, cts.Token), Is.EqualTo(jobSettings));
 
             cts.Cancel();
-
         }
         finally
         {
             ProcessModule.TerminateProcess(cmd.Handle, 0);
-        }
-
-        var buffer = new ArrayBufferWriter<byte>(1024);
-
-        async Task<JobSettings> GetJobSettingsFromMonitor(CancellationToken ct)
-        {
-            using var pipe = new NamedPipeClientStream(".", Program.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-
-            await pipe.ConnectAsync(500, ct);
-
-            var buffer = new ArrayBufferWriter<byte>(1024);
-
-            MessagePackSerializer.Serialize<IMonitorRequest>(buffer, new GetJobNameReq(cmd.Id), cancellationToken: ct);
-            await pipe.WriteAsync(buffer.WrittenMemory, ct);
-            buffer.ResetWrittenCount();
-
-            int readBytes = await pipe.ReadAsync(buffer.GetMemory(), ct);
-            Assert.That(readBytes > 0);
-            buffer.Advance(readBytes);
-            if (MessagePackSerializer.Deserialize<IMonitorResponse>(buffer.WrittenMemory,
-                bytesRead: out var deseralizedBytes, cancellationToken: ct) is GetJobNameResp
-                {
-                    JobName: var jobName
-                })
-            {
-                Assert.That(readBytes, Is.EqualTo(deseralizedBytes));
-            }
-            else { throw new InvalidOperationException(); }
-            Assert.That(jobName, Is.Not.Null.And.Not.Empty);
-            buffer.ResetWrittenCount();
-
-            MessagePackSerializer.Serialize<IMonitorRequest>(buffer, new GetJobSettingsReq(jobName), cancellationToken: ct);
-            await pipe.WriteAsync(buffer.WrittenMemory, ct);
-            buffer.ResetWrittenCount();
-
-            readBytes = await pipe.ReadAsync(buffer.GetMemory(), ct);
-            Assert.That(readBytes > 0);
-            buffer.Advance(readBytes);
-
-            if (MessagePackSerializer.Deserialize<IMonitorResponse>(buffer.WrittenMemory,
-                bytesRead: out deseralizedBytes, cancellationToken: ct) is GetJobSettingsResp
-                {
-                    JobSettings: var receivedJobSettings
-                })
-            {
-                Assert.That(readBytes, Is.EqualTo(deseralizedBytes));
-                return receivedJobSettings;
-            }
-            else { throw new InvalidOperationException(); }
         }
     }
 
