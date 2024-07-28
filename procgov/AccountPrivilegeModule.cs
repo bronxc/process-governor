@@ -77,11 +77,10 @@ internal unsafe static class AccountPrivilegeModule
         {
             try
             {
-                return privileges.Where(priv => priv.Result == (int)WIN32_ERROR.NO_ERROR).Select(priv =>
-                {
-                    return PInvoke.AdjustTokenPrivileges(tokenHandle, false, priv.ReplacedPrivilege, 0, null, null) ?
-                        (priv.PrivilegeName, (int)WIN32_ERROR.NO_ERROR) : (priv.PrivilegeName, Marshal.GetLastWin32Error());
-                });
+                // we need ToList to make sure that the tokenHandle is disposed after we adjust the privileges
+                return privileges.Where(priv => priv.Result == (int)WIN32_ERROR.NO_ERROR).Select(
+                    priv => PInvoke.AdjustTokenPrivileges(tokenHandle, false, priv.ReplacedPrivilege, 0, null, null) ?
+                        (priv.PrivilegeName, (int)WIN32_ERROR.NO_ERROR) : (priv.PrivilegeName, Marshal.GetLastWin32Error())).ToList();
             }
             finally
             {

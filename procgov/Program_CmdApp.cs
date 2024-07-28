@@ -233,7 +233,7 @@ static partial class Program
                     MaxJobMemory = existing.MaxJobMemory > 0 ? existing.MaxJobMemory : updated.MaxJobMemory,
                     MinWorkingSetSize = existing.MinWorkingSetSize > 0 ? existing.MinWorkingSetSize : updated.MinWorkingSetSize,
                     MaxWorkingSetSize = existing.MaxWorkingSetSize > 0 ? existing.MaxWorkingSetSize : updated.MaxWorkingSetSize,
-                    NumaNode = existing.NumaNode != 0xffff ? existing.NumaNode : updated.NumaNode,
+                    NumaNode = existing.NumaNode != ushort.MaxValue ? existing.NumaNode : updated.NumaNode,
                     ProcessUserTimeLimitInMilliseconds = existing.ProcessUserTimeLimitInMilliseconds > 0 ?
                         existing.ProcessUserTimeLimitInMilliseconds : updated.ProcessUserTimeLimitInMilliseconds,
                     JobUserTimeLimitInMilliseconds = existing.JobUserTimeLimitInMilliseconds > 0 ?
@@ -296,8 +296,8 @@ static partial class Program
             try { await pipe.ConnectAsync(10, ct); }
             catch
             {
-                // FIXME: should be no gui here
-                using var _ = Process.Start(Environment.ProcessPath!, "--monitor");
+                string args = Logger.Switch.Level == SourceLevels.Verbose ? "--monitor --verbose" : "--monitor";
+                using var _ = Process.Start(Environment.ProcessPath!, args);
 
                 while (!pipe.IsConnected && !ct.IsCancellationRequested)
                 {
@@ -344,7 +344,7 @@ static partial class Program
             Debug.Assert(session.MinWorkingSetSize > 0);
             Console.WriteLine($"Maximum WS memory (MB):                     {(session.MaxWorkingSetSize / 1048576):0,0}");
         }
-        if (session.NumaNode != 0xffff)
+        if (session.NumaNode != ushort.MaxValue)
         {
             Console.WriteLine($"Preferred NUMA node:                        {session.NumaNode}");
         }

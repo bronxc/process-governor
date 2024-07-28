@@ -8,7 +8,7 @@ using System.IO.Pipes;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ProcessGovernor.Tests;
+namespace ProcessGovernor.Tests.InProcess;
 
 public static partial class ProgramTests
 {
@@ -118,11 +118,11 @@ public static partial class ProgramTests
             using var monitoredProcess = Process.Start(executablePath);
 
             // give it time to discover a new process
-            await Task.Delay(2000, cts.Token);
+            await Task.Delay(Program.ServiceProcessObserverIntervalInMilliseconds * 2, cts.Token);
 
             try
             {
-                Assert.That(await GetJobSettingsFromMonitor((uint)monitoredProcess.Id, cts.Token),
+                Assert.That(await SharedApi.GetJobSettingsFromMonitor((uint)monitoredProcess.Id, cts.Token),
                     Is.EqualTo(settings.JobSettings));
 
                 svc.Stop();
@@ -141,83 +141,5 @@ public static partial class ProgramTests
         {
             Program.RemoveSavedProcessSettings("winver.exe");
         }
-    }
-
-    /* FIXME: tests to implement:
-     * - if privileged, install service, start it and try service mode (maybe separate set of tests)
-     */
-    [Test]
-    public static async Task ServiceSetupAndMonitoredProcessLaunch()
-    {
-        if (!Environment.IsPrivilegedProcess)
-        {
-            Assert.Ignore("This test requires elevated privileges");
-        }
-
-        ProcessGovernorTestContext.Initialize();
-
-        const string monitoredExecutablePath = "winver.exe";
-
-        //using var cts = new CancellationTokenSource(30000);
-        using var cts = new CancellationTokenSource();
-
-        var procgovExecutablePath = Path.Combine(AppContext.BaseDirectory, "procgov.exe");
-
-        try
-        {
-            var psi = new ProcessStartInfo(procgovExecutablePath)
-            {
-                Arguments = $"--install -c 0x1 --service-path \"{Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory)}\" winver.exe",
-                UseShellExecute = false,
-                RedirectStandardOutput = true
-            };
-            using var procgov = Process.Start(psi)!;
-            await procgov.WaitForExitAsync(cts.Token);
-            TestContext.Out.WriteLine(await procgov.StandardOutput.ReadToEndAsync(cts.Token));
-
-            // give it some time to start (it enumerates running processes)
-            await Task.Delay(2000, cts.Token);
-
-            // the monitor should start with the first monitored process
-            using var monitoredProcess = Process.Start(monitoredExecutablePath);
-
-            // give it time to discover a new process
-            await Task.Delay(Program.ServiceProcessObserverIntervalInMilliseconds * 2, cts.Token);
-
-            try
-            {
-                Assert.That(await GetJobSettingsFromMonitor((uint)monitoredProcess.Id, cts.Token),
-                    Is.EqualTo(new JobSettings(CpuAffinityMask: 0x1)));
-            }
-            finally
-            {
-                monitoredProcess.CloseMainWindow();
-                if (!monitoredProcess.WaitForExit(500))
-                {
-                    monitoredProcess.Kill();
-                }
-            }
-            // FIXME: will install and start the service with some monitored process,
-            // then will query monitor if the process is monitored
-
-            // FIXME: try installing more than processes and check if the service is removed when the last process is removed
-
-        }
-        finally
-        {
-            using var _ = Process.Start(procgovExecutablePath, $"--uninstall --service-path \"{AppContext.BaseDirectory}\" winver.exe");
-        }
-    }
-
-    [Test]
-    public static void ServiceSetupAndRunPrivilegedCmdApp()
-    {
-        if (!Environment.IsPrivilegedProcess)
-        {
-            Assert.Ignore("This test requires elevated privileges");
-        }
-
-        // FIXME: privileged mode should start the service if it's not running
-        // and use the system named pipe
     }
 }

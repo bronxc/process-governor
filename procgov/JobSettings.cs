@@ -1,5 +1,4 @@
 ﻿using MessagePack;
-using System.Runtime.InteropServices;
 
 namespace ProcessGovernor;
 
@@ -16,7 +15,7 @@ public record JobSettings(
     [property: Key(8)] uint JobUserTimeLimitInMilliseconds = 0,
     [property: Key(9)] uint ClockTimeLimitInMilliseconds = 0,
     [property: Key(10)] bool PropagateOnChildProcesses = false,
-    [property: Key(11)] ushort NumaNode = 0xffff,
+    [property: Key(11)] ushort NumaNode = ushort.MaxValue,
     [property: Key(12)] uint ActiveProcessLimit = 0
 );
 

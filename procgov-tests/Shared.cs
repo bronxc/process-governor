@@ -34,3 +34,53 @@ static class ProcessGovernorTestContext
     }
 }
 
+static class SharedApi
+{
+    public static async Task<JobSettings> GetJobSettingsFromMonitor(uint processId, CancellationToken ct)
+    {
+        using var pipe = new NamedPipeClientStream(".", Program.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+
+        await pipe.ConnectAsync(500, ct);
+
+        var buffer = new ArrayBufferWriter<byte>(1024);
+
+        MessagePackSerializer.Serialize<IMonitorRequest>(buffer, new GetJobNameReq(processId), cancellationToken: ct);
+        await pipe.WriteAsync(buffer.WrittenMemory, ct);
+        buffer.ResetWrittenCount();
+
+        int readBytes = await pipe.ReadAsync(buffer.GetMemory(), ct);
+        Assert.That(readBytes > 0);
+        buffer.Advance(readBytes);
+        if (MessagePackSerializer.Deserialize<IMonitorResponse>(buffer.WrittenMemory,
+            bytesRead: out var deseralizedBytes, cancellationToken: ct) is GetJobNameResp
+            {
+                JobName: var jobName
+            })
+        {
+            Assert.That(readBytes, Is.EqualTo(deseralizedBytes));
+        }
+        else { throw new InvalidOperationException(); }
+        Assert.That(jobName, Is.Not.Null.And.Not.Empty);
+        buffer.ResetWrittenCount();
+
+        MessagePackSerializer.Serialize<IMonitorRequest>(buffer, new GetJobSettingsReq(jobName), cancellationToken: ct);
+        await pipe.WriteAsync(buffer.WrittenMemory, ct);
+        buffer.ResetWrittenCount();
+
+        readBytes = await pipe.ReadAsync(buffer.GetMemory(), ct);
+        Assert.That(readBytes > 0);
+        buffer.Advance(readBytes);
+
+        if (MessagePackSerializer.Deserialize<IMonitorResponse>(buffer.WrittenMemory,
+            bytesRead: out deseralizedBytes, cancellationToken: ct) is GetJobSettingsResp
+            {
+                JobSettings: var receivedJobSettings
+            })
+        {
+            Assert.That(readBytes, Is.EqualTo(deseralizedBytes));
+            return receivedJobSettings;
+        }
+        else { throw new InvalidOperationException(); }
+    }
+}
+

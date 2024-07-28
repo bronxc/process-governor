@@ -79,7 +79,7 @@ static class Win32JobModule
 
     public static void SetLimits(Win32Job job, JobSettings session)
     {
-        if (session.NumaNode != 0xffff)
+        if (session.NumaNode != ushort.MaxValue)
         {
             CheckWin32Result(PInvoke.GetNumaHighestNodeNumber(out var highestNodeNumber));
             if (session.NumaNode > highestNodeNumber)
@@ -209,11 +209,11 @@ static class Win32JobModule
 
     static unsafe void SetNumaAffinity(Win32Job job, JobSettings session, ulong systemOrProcessorGroupAffinityMask)
     {
-        if (session.NumaNode != 0xffff || session.CpuAffinityMask != 0)
+        if (session.NumaNode != ushort.MaxValue || session.CpuAffinityMask != 0)
         {
             GROUP_AFFINITY calculateGroupAffinity()
             {
-                if (session.NumaNode != 0xffff)
+                if (session.NumaNode != ushort.MaxValue)
                 {
                     CheckWin32Result(PInvoke.GetNumaNodeProcessorMaskEx(session.NumaNode, out var groupAffinity));
                     /*

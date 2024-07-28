@@ -1,5 +1,6 @@
 ﻿using MessagePack;
 using Microsoft.Win32;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.ServiceProcess;
 
@@ -193,10 +194,10 @@ static partial class Program
                                     }
                                 }
                             }
-                            catch (InvalidOperationException ex)
+                            catch (Exception ex) when (ex is InvalidOperationException || ex is Win32Exception)
                             {
                                 // might occur when we try to access the process' main module
-                                Logger.TraceInformation($"Failed when getting information about process {p.Id}: {ex}");
+                                Logger.TraceEvent(TraceEventType.Warning, 0, $"Failed when getting information about process {p.Id}: {ex}");
                             }
                             currentRunningProcesses.Add(p.Id);
                         }

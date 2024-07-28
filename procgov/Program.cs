@@ -135,18 +135,30 @@ static partial class Program
                                 "nomonitor", "monitor", "uninstall-all" , "h", "?", "help"], rawArgs);
 
             var jobSettings = new JobSettings(
-                parsedArgs.Remove("maxmem", out var v) || parsedArgs.Remove("m", out v) ? ParseMemoryString(v[^1]) : 0,
-                parsedArgs.Remove("maxjobmem", out v) ? ParseMemoryString(v[^1]) : 0,
-                parsedArgs.Remove("maxws", out v) ? ParseMemoryString(v[^1]) : 0,
-                parsedArgs.Remove("minws", out v) ? ParseMemoryString(v[^1]) : 0,
-                parsedArgs.Remove("c", out v) || parsedArgs.Remove("cpu", out v) ? ParseCpuAffinity(v[^1]) : 0,
-                parsedArgs.Remove("e", out v) || parsedArgs.Remove("cpurate", out v) ? ParseCpuRate(v[^1]) : 0,
-                parsedArgs.Remove("b", out v) || parsedArgs.Remove("bandwidth", out v) ? ParseByteLength(v[^1]) : 0,
-                parsedArgs.Remove("process-utime", out v) ? ParseTimeStringToMilliseconds(v[^1]) : 0,
-                parsedArgs.Remove("job-utime", out v) ? ParseTimeStringToMilliseconds(v[^1]) : 0,
-                parsedArgs.Remove("t", out v) || parsedArgs.Remove("timeout", out v) ? ParseTimeStringToMilliseconds(v[^1]) : 0,
-                parsedArgs.Remove("r") || parsedArgs.Remove("recursive"),
-                parsedArgs.Remove("n", out v) || parsedArgs.Remove("node", out v) ? ushort.Parse(v[^1]) : (ushort)0
+                MaxProcessMemory: parsedArgs.Remove("maxmem", out var v) || parsedArgs.Remove("m", out v) ? ParseMemoryString(v[^1]) : 0,
+                MaxJobMemory:
+                    parsedArgs.Remove("maxjobmem", out v) ? ParseMemoryString(v[^1]) : 0,
+                MaxWorkingSetSize:
+                    parsedArgs.Remove("maxws", out v) ? ParseMemoryString(v[^1]) : 0,
+                MinWorkingSetSize:
+                    parsedArgs.Remove("minws", out v) ? ParseMemoryString(v[^1]) : 0,
+                CpuAffinityMask:
+                    parsedArgs.Remove("c", out v) || parsedArgs.Remove("cpu", out v) ? ParseCpuAffinity(v[^1]) : 0,
+                CpuMaxRate:
+                    parsedArgs.Remove("e", out v) || parsedArgs.Remove("cpurate", out v) ? ParseCpuRate(v[^1]) : 0,
+                MaxBandwidth:
+                    parsedArgs.Remove("b", out v) || parsedArgs.Remove("bandwidth", out v) ? ParseByteLength(v[^1]) : 0,
+                ProcessUserTimeLimitInMilliseconds:
+                    parsedArgs.Remove("process-utime", out v) ? ParseTimeStringToMilliseconds(v[^1]) : 0,
+                JobUserTimeLimitInMilliseconds:
+                    parsedArgs.Remove("job-utime", out v) ? ParseTimeStringToMilliseconds(v[^1]) : 0,
+                ClockTimeLimitInMilliseconds:
+                    parsedArgs.Remove("t", out v) || parsedArgs.Remove("timeout", out v) ? ParseTimeStringToMilliseconds(v[^1]) : 0,
+                PropagateOnChildProcesses:
+                    parsedArgs.Remove("r") || parsedArgs.Remove("recursive"),
+                NumaNode:
+                    parsedArgs.Remove("n", out v) || parsedArgs.Remove("node", out v) ? ushort.Parse(v[^1]) : ushort.MaxValue,
+                ActiveProcessLimit: 0 // not yet available in command line
             );
 
             if (jobSettings.MaxWorkingSetSize != jobSettings.MinWorkingSetSize &&

@@ -271,6 +271,7 @@ static partial class Program
 
                     if (stopMonitor)
                     {
+                        Logger.TraceInformation($"[process monitor] stopping monitor (no more jobs)");
                         cts.Cancel();
                     }
                 }

@@ -12,7 +12,7 @@ using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.System.Threading;
 
-namespace ProcessGovernor.Tests;
+namespace ProcessGovernor.Tests.InProcess;
 
 public static partial class ProgramTests
 {
@@ -276,26 +276,6 @@ public static partial class ProgramTests
         Assert.That(readBytes, Is.EqualTo(deseralizedBytes));
         buffer.ResetWrittenCount();
 
-        // job settings check
-        MessagePackSerializer.Serialize<IMonitorRequest>(buffer, new GetJobSettingsReq(job.Name), cancellationToken: ct);
-        await pipe.WriteAsync(buffer.WrittenMemory, ct);
-        buffer.ResetWrittenCount();
-
-        readBytes = await pipe.ReadAsync(buffer.GetMemory(), ct);
-        Assert.That(readBytes > 0);
-        buffer.Advance(readBytes);
-        if (MessagePackSerializer.Deserialize<IMonitorResponse>(buffer.WrittenMemory,
-            bytesRead: out deseralizedBytes, cancellationToken: ct) is GetJobSettingsResp
-            {
-                JobSettings: var receivedJobSettings
-            })
-        {
-            Assert.That(readBytes, Is.EqualTo(deseralizedBytes));
-            Assert.That(receivedJobSettings, Is.EqualTo(jobSettings));
-        }
-        else { Assert.Fail(); }
-        buffer.ResetWrittenCount();
-
         // start monitoring
         MessagePackSerializer.Serialize<IMonitorRequest>(buffer, new MonitorJobReq(job.Name, processNotification is not null,
             jobSettings), cancellationToken: ct);
@@ -305,6 +285,12 @@ public static partial class ProgramTests
         var notificationListenerTask = processNotification is not null ? NotificationListener() : Task.CompletedTask;
 
         Win32JobModule.AssignProcess(job, processHandle);
+
+        // give it some time to process the request
+        await Task.Delay(1000, ct);
+
+        // job settings check
+        Assert.That(await SharedApi.GetJobSettingsFromMonitor(pid, ct), Is.EqualTo(jobSettings));
 
         NtApi.CheckWin32Result(PInvoke.ResumeThread(threadHandle));
 
@@ -358,52 +344,5 @@ public static partial class ProgramTests
                 Marshal.FreeHGlobal(processArgsPtr);
             }
         }
-    }
-
-    static async Task<JobSettings> GetJobSettingsFromMonitor(uint processId, CancellationToken ct)
-    {
-        using var pipe = new NamedPipeClientStream(".", Program.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-
-        await pipe.ConnectAsync(500, ct);
-
-        var buffer = new ArrayBufferWriter<byte>(1024);
-
-        MessagePackSerializer.Serialize<IMonitorRequest>(buffer, new GetJobNameReq(processId), cancellationToken: ct);
-        await pipe.WriteAsync(buffer.WrittenMemory, ct);
-        buffer.ResetWrittenCount();
-
-        int readBytes = await pipe.ReadAsync(buffer.GetMemory(), ct);
-        Assert.That(readBytes > 0);
-        buffer.Advance(readBytes);
-        if (MessagePackSerializer.Deserialize<IMonitorResponse>(buffer.WrittenMemory,
-            bytesRead: out var deseralizedBytes, cancellationToken: ct) is GetJobNameResp
-            {
-                JobName: var jobName
-            })
-        {
-            Assert.That(readBytes, Is.EqualTo(deseralizedBytes));
-        }
-        else { throw new InvalidOperationException(); }
-        Assert.That(jobName, Is.Not.Null.And.Not.Empty);
-        buffer.ResetWrittenCount();
-
-        MessagePackSerializer.Serialize<IMonitorRequest>(buffer, new GetJobSettingsReq(jobName), cancellationToken: ct);
-        await pipe.WriteAsync(buffer.WrittenMemory, ct);
-        buffer.ResetWrittenCount();
-
-        readBytes = await pipe.ReadAsync(buffer.GetMemory(), ct);
-        Assert.That(readBytes > 0);
-        buffer.Advance(readBytes);
-
-        if (MessagePackSerializer.Deserialize<IMonitorResponse>(buffer.WrittenMemory,
-            bytesRead: out deseralizedBytes, cancellationToken: ct) is GetJobSettingsResp
-            {
-                JobSettings: var receivedJobSettings
-            })
-        {
-            Assert.That(readBytes, Is.EqualTo(deseralizedBytes));
-            return receivedJobSettings;
-        }
-        else { throw new InvalidOperationException(); }
     }
 }

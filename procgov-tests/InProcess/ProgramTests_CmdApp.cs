@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Windows.Win32;
 
-namespace ProcessGovernor.Tests;
+namespace ProcessGovernor.Tests.InProcess;
 
 [TestFixture]
 public static partial class ProgramTests
@@ -93,13 +93,13 @@ public static partial class ProgramTests
             await Program.Execute(new RunAsCmdApp(jobSettings, new AttachToProcess([cmd.Id]),
                 [], [], LaunchConfig.Quiet, ExitBehavior.DontWaitForJobCompletion), cts.Token);
 
-            Assert.That(await GetJobSettingsFromMonitor(cmd.Id, cts.Token), Is.EqualTo(jobSettings));
+            Assert.That(await SharedApi.GetJobSettingsFromMonitor(cmd.Id, cts.Token), Is.EqualTo(jobSettings));
 
             jobSettings = jobSettings with { CpuMaxRate = 50 };
             await Program.Execute(new RunAsCmdApp(jobSettings, new AttachToProcess([cmd.Id]),
                 [], [], LaunchConfig.Quiet, ExitBehavior.DontWaitForJobCompletion), cts.Token);
 
-            Assert.That(await GetJobSettingsFromMonitor(cmd.Id, cts.Token), Is.EqualTo(jobSettings));
+            Assert.That(await SharedApi.GetJobSettingsFromMonitor(cmd.Id, cts.Token), Is.EqualTo(jobSettings));
 
             cts.Cancel();
         }
