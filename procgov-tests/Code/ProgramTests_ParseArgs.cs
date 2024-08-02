@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 
-namespace ProcessGovernor.Tests.InProcess;
+namespace ProcessGovernor.Tests.Code;
 
 public static partial class ProgramTests
 {

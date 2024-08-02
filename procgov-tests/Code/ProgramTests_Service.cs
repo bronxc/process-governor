@@ -8,7 +8,7 @@ using System.IO.Pipes;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ProcessGovernor.Tests.InProcess;
+namespace ProcessGovernor.Tests.Code;
 
 public static partial class ProgramTests
 {

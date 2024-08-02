@@ -12,7 +12,7 @@ using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.System.Threading;
 
-namespace ProcessGovernor.Tests.InProcess;
+namespace ProcessGovernor.Tests.Code;
 
 public static partial class ProgramTests
 {
@@ -271,15 +271,23 @@ public static partial class ProgramTests
         Assert.That(readBytes > 0);
         buffer.Advance(readBytes);
 
-        Assert.That(MessagePackSerializer.Deserialize<IMonitorResponse>(buffer.WrittenMemory,
-            bytesRead: out var deseralizedBytes, cancellationToken: ct) is GetJobNameResp { JobName: "" });
-        Assert.That(readBytes, Is.EqualTo(deseralizedBytes));
+        var resp = MessagePackSerializer.Deserialize<IMonitorResponse>(buffer.WrittenMemory, out var deserializedBytes, ct);
+        Assert.That(resp is GetJobNameResp { JobName: "" });
+        Assert.That(readBytes, Is.EqualTo(deserializedBytes));
         buffer.ResetWrittenCount();
 
         // start monitoring
         MessagePackSerializer.Serialize<IMonitorRequest>(buffer, new MonitorJobReq(job.Name, processNotification is not null,
             jobSettings), cancellationToken: ct);
         await pipe.WriteAsync(buffer.WrittenMemory, ct);
+        buffer.ResetWrittenCount();
+
+        readBytes = await pipe.ReadAsync(buffer.GetMemory(), ct);
+        buffer.Advance(readBytes);
+
+        resp = MessagePackSerializer.Deserialize<IMonitorResponse>(buffer.WrittenMemory, out deserializedBytes, ct);
+        Assert.That(resp is MonitorJobResp { JobName: var jobName } && jobName == job.Name);
+        Assert.That(readBytes, Is.EqualTo(deserializedBytes));
         buffer.ResetWrittenCount();
 
         var notificationListenerTask = processNotification is not null ? NotificationListener() : Task.CompletedTask;

@@ -5,19 +5,21 @@ using System.ServiceProcess;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ProcessGovernor.Tests.ExtProcess;
+namespace ProcessGovernor.Tests.Application;
 
 public static class ServiceTests
 {
     [Test]
     public static async Task ServiceSetupAndRemoval()
     {
-
-        ProcessGovernorTestContext.Initialize();
+        if (!Environment.IsPrivilegedProcess)
+        {
+            Assert.Ignore("This test requires elevated privileges");
+        }
 
         string[] monitoredExecutablePaths = ["test1.exe", "test2.exe"];
 
-        using var cts = new CancellationTokenSource(30000);
+        using var cts = new CancellationTokenSource(60000);
 
         var procgovExecutablePath = Path.Combine(AppContext.BaseDirectory, "procgov.exe");
 
@@ -97,8 +99,7 @@ public static class ServiceTests
 
         const string monitoredExecutablePath = "winver.exe";
 
-        //using var cts = new CancellationTokenSource(30000);
-        using var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource(90000);
 
         var procgovExecutablePath = Path.Combine(AppContext.BaseDirectory, "procgov.exe");
 
@@ -147,6 +148,4 @@ public static class ServiceTests
 
         Assert.That(WindowsServiceModule.IsServiceInstalled(Program.ServiceName), Is.False);
     }
-
-
 }

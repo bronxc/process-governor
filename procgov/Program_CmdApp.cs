@@ -106,6 +106,10 @@ static partial class Program
             exitCode = app.JobTarget is LaunchProcess ?
                 (PInvoke.GetExitCodeProcess(targetProcesses[0].Handle, out var rc) ? rc : 0) : 0;
         }
+        else
+        {
+            Debug.Assert(app.JobSettings.ClockTimeLimitInMilliseconds == 0);
+        }
 
         return (int)exitCode;
 
@@ -178,6 +182,17 @@ static partial class Program
                 MessagePackSerializer.Serialize<IMonitorRequest>(buffer, new MonitorJobReq(job.Name,
                     subscribeToEvents, jobSettings), cancellationToken: ct);
                 await pipe.WriteAsync(buffer.WrittenMemory, ct);
+
+                buffer.ResetWrittenCount();
+                int readBytes = await pipe.ReadAsync(buffer.GetMemory(), ct);
+                buffer.Advance(readBytes);
+
+                switch (MessagePackSerializer.Deserialize<IMonitorResponse>(buffer.WrittenMemory,
+                            bytesRead: out var deserializedBytes, cancellationToken: ct))
+                {
+                    case MonitorJobResp { JobName: var jobName } when job.Name == jobName: break;
+                    default: throw new InvalidOperationException("Unexpected monitor response");
+                }
             }
 
             async Task<string[]> GetProcessJobNames(uint[] processIds)

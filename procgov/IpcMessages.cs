@@ -24,13 +24,14 @@ public record GetJobSettingsReq([property: Key(0)] string JobName) : IMonitorReq
 
 /* ***** Responses ***** */
 
-[Union(0, typeof(GetJobNameResp))]
-[Union(1, typeof(GetJobSettingsResp))]
-[Union(2, typeof(NewProcessEvent))]
-[Union(3, typeof(ExitProcessEvent))]
-[Union(4, typeof(JobLimitExceededEvent))]
-[Union(5, typeof(ProcessLimitExceededEvent))]
-[Union(6, typeof(NoProcessesInJobEvent))]
+[Union(0, typeof(MonitorJobResp))]
+[Union(1, typeof(GetJobNameResp))]
+[Union(2, typeof(GetJobSettingsResp))]
+[Union(3, typeof(NewProcessEvent))]
+[Union(4, typeof(ExitProcessEvent))]
+[Union(5, typeof(JobLimitExceededEvent))]
+[Union(6, typeof(ProcessLimitExceededEvent))]
+[Union(7, typeof(NoProcessesInJobEvent))]
 public interface IMonitorResponse { }
 
 // JobName is an empty string is there is no job associated with the process
@@ -39,6 +40,9 @@ public record GetJobNameResp([property: Key(0)] string JobName) : IMonitorRespon
 
 [MessagePackObject]
 public record GetJobSettingsResp([property: Key(0)] JobSettings JobSettings) : IMonitorResponse;
+
+[MessagePackObject]
+public record MonitorJobResp([property: Key(0)] string JobName) : IMonitorResponse;
 
 /* ***** Notifications ***** */
 

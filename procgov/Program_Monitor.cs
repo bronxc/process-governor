@@ -21,6 +21,9 @@ static partial class Program
 
     public static async Task<int> Execute(RunAsMonitor _, CancellationToken ct)
     {
+        // currently, we use the DefaultTraceListener, but I plan to switch to ETW-based EventSource
+        Program.Logger.Listeners.Add(new DefaultTraceListener());
+
         try
         {
             await StartMonitor(ct);
@@ -107,11 +110,13 @@ static partial class Program
                     {
                         var msg = MessagePackSerializer.Deserialize<IMonitorRequest>(readBuffer.WrittenMemory[processedBytes..],
                                         bytesRead: out var deserializedBytes, cancellationToken: cts.Token);
+
+                        writeBuffer.ResetWrittenCount();
+
                         switch (msg)
                         {
                             case GetJobNameReq { ProcessId: var processId }:
                                 {
-                                    writeBuffer.ResetWrittenCount();
                                     var resp = new GetJobNameResp(processes.TryGetJobAssignedToProcess(processId, out var jobHandle) &&
                                             monitoredJobs.TryGetJob(jobHandle, out var jobData) ? jobData.Job.Name : "");
                                     MessagePackSerializer.Serialize<IMonitorResponse>(writeBuffer, resp, cancellationToken: cts.Token);
@@ -120,7 +125,6 @@ static partial class Program
                                 }
                             case GetJobSettingsReq { JobName: var jobName }:
                                 {
-                                    writeBuffer.ResetWrittenCount();
                                     var resp = new GetJobSettingsResp(monitoredJobs.TryGetJob(jobName, out var jobData) ?
                                         jobData.JobSettings : new());
                                     MessagePackSerializer.Serialize<IMonitorResponse>(writeBuffer, resp, cancellationToken: cts.Token);
@@ -146,6 +150,10 @@ static partial class Program
                                         notifier.AddNotificationStream(jobData.Job.NativeHandle, pipe);
                                         disposePipeOnExit = false;
                                     }
+
+                                    var resp = new MonitorJobResp(monitorJob.JobName);
+                                    MessagePackSerializer.Serialize<IMonitorResponse>(writeBuffer, resp, cancellationToken: cts.Token);
+                                    await pipe.WriteAsync(writeBuffer.WrittenMemory, cts.Token);
                                     break;
                                 }
                             default:
@@ -246,7 +254,9 @@ static partial class Program
                     if (notifier.GetNotificationStreams(jobHandle) is var jobNotificationStreams && jobNotificationStreams.Length > 0)
                     {
                         MessagePackSerializer.Serialize(buffer, jobEvent, cancellationToken: cts.Token);
-                        var sendTasks = jobNotificationStreams.Select(stream => stream.WriteAsync(buffer.WrittenMemory, cts.Token).AsTask()).ToArray();
+                        var sendTasks = jobNotificationStreams.Select(stream =>
+                            stream.SafePipeHandle.IsClosed ? Task.FromException(new IOException("pipe is closed")) :
+                                stream.WriteAsync(buffer.WrittenMemory, cts.Token).AsTask()).ToArray();
 
                         int completedTasksCount = 0;
                         while (completedTasksCount < sendTasks.Length)

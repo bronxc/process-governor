@@ -36,6 +36,21 @@ static class ProcessGovernorTestContext
 
 static class SharedApi
 {
+    public static async Task<bool> IsMonitorListening(CancellationToken ct)
+    {
+        using var pipe = new NamedPipeClientStream(".", Program.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+
+        try
+        {
+            await pipe.ConnectAsync(500, ct);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
+    }
+
     public static async Task<JobSettings> GetJobSettingsFromMonitor(uint processId, CancellationToken ct)
     {
         using var pipe = new NamedPipeClientStream(".", Program.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);

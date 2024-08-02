@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Windows.Win32;
 
-namespace ProcessGovernor.Tests.InProcess;
+namespace ProcessGovernor.Tests.Code;
 
 [TestFixture]
 public static partial class ProgramTests

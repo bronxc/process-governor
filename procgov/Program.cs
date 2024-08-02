@@ -18,9 +18,8 @@ static partial class Program
 
         Console.CancelKeyPress += (_, ev) => { ev.Cancel = true; cts.Cancel(); };
 
-#if !DEBUG
-            Logger.Listeners.Clear();
-#endif
+        // we don't want any default trace listeners
+        Logger.Listeners.Clear();
 
         try
         {
@@ -38,18 +37,13 @@ static partial class Program
         }
         catch (Win32Exception ex)
         {
-            Console.Error.WriteLine($"ERROR: {ex.Message} (0x{ex.ErrorCode:X})");
-#if DEBUG
-            Console.Error.WriteLine(ex);
-#endif
+            Console.Error.WriteLine($"ERROR: 0x{ex.ErrorCode:X} Win32 error");
+            Console.Error.WriteLine($"{ex}");
             return 0xff;
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"ERROR: {ex}");
-#if DEBUG
-            Console.Error.WriteLine(ex);
-#endif
             return 0xff;
         }
     }
