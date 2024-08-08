@@ -21,8 +21,7 @@ public static class CmdAppTests
         var psi = new ProcessStartInfo(procgovExecutablePath)
         {
             Arguments = $"-c 0x1 \"{executablePath}\"",
-            UseShellExecute = false,
-            RedirectStandardOutput = true
+            UseShellExecute = false
         };
         using var procgov = Process.Start(psi)!;
 
@@ -48,7 +47,6 @@ public static class CmdAppTests
         }
 
         await procgov.WaitForExitAsync(cts.Token);
-        TestContext.Out.WriteLine(await procgov.StandardOutput.ReadToEndAsync(cts.Token));
 
         // give the monitor some time to process the process exit event
         await Task.Delay(1000, cts.Token);
@@ -79,10 +77,12 @@ public static class CmdAppTests
         // give the monitor some time to process the job start event
         await Task.Delay(2000);
 
-        var winver = Process.GetProcessesByName("winver").FirstOrDefault(p => p.StartTime > startTime);
+        var winver = Process.GetProcessesByName(
+            Path.GetFileNameWithoutExtension(executablePath)).FirstOrDefault(p => p.StartTime > startTime);
         while (!cts.IsCancellationRequested && winver == null)
         {
-            winver = Process.GetProcessesByName("winver").FirstOrDefault(p => p.StartTime > startTime);
+            winver = Process.GetProcessesByName(
+                Path.GetFileNameWithoutExtension(executablePath)).FirstOrDefault(p => p.StartTime > startTime);
         }
 
         Debug.Assert(winver is not null);
@@ -121,12 +121,98 @@ public static class CmdAppTests
     [Test]
     public static async Task AttachToProcess()
     {
+        const string executablePath = "winver.exe";
 
+        using var cts = new CancellationTokenSource(60000);
+
+        using var winver = Process.Start(executablePath)!;
+
+        await Task.Delay(1000);
+
+        using (var procgov = Process.Start(new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "procgov.exe"))
+        {
+            Arguments = $"-c 0x1 --nowait -p \"{winver.Id}\"",
+            UseShellExecute = false
+        })!)
+        {
+            await procgov.WaitForExitAsync(cts.Token);
+
+            // check if the monitor is running
+            var settings = await SharedApi.GetJobSettingsFromMonitor((uint)winver.Id, cts.Token);
+            Assert.That(settings, Is.EqualTo(new JobSettings(CpuAffinityMask: 0x1, NumaNode: ushort.MaxValue)));
+        }
+
+        // update the job settings
+        using (var procgov = Process.Start(new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "procgov.exe"))
+        {
+            Arguments = $"-c 0x2 --nowait -p \"{winver.Id}\"",
+            UseShellExecute = false
+        })!)
+        {
+            await procgov.WaitForExitAsync(cts.Token);
+
+            // check if the monitor is running
+            var settings = await SharedApi.GetJobSettingsFromMonitor((uint)winver.Id, cts.Token);
+            Assert.That(settings, Is.EqualTo(new JobSettings(CpuAffinityMask: 0x2, NumaNode: ushort.MaxValue)));
+        }
+
+        winver.CloseMainWindow();
+        if (!winver.WaitForExit(2000))
+        {
+            winver.Kill();
+        }
+
+        // give the monitor some time to process the process exit event
+        await Task.Delay(1000, cts.Token);
+
+        Assert.That(await SharedApi.IsMonitorListening(cts.Token), Is.False);
     }
 
     [Test]
     public static async Task AttachToMultipleProcesses()
     {
-        // FIXME: try attaching to process belonging to a different group
+        const string executablePath = "winver.exe";
+
+        using var cts = new CancellationTokenSource(60000);
+
+        using var winver1 = Process.Start(executablePath)!;
+        using var winver2 = Process.Start(executablePath)!;
+
+        await Task.Delay(2000);
+
+        using var procgov = Process.Start(new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "procgov.exe"))
+        {
+            Arguments = $"-c 0x1 -p {winver1.Id} -p {winver2.Id}",
+            UseShellExecute = false,
+            RedirectStandardOutput = true
+        })!;
+
+        _ = procgov.StandardOutput.ReadToEndAsync(cts.Token).ContinueWith(s => TestContext.Out.WriteLine(s.Result), cts.Token);
+
+        // give the monitor some time to process the job start event
+        await Task.Delay(2000);
+
+        // check if the monitor is running
+        var settings = await SharedApi.GetJobSettingsFromMonitor((uint)winver1.Id, cts.Token);
+        Assert.That(settings, Is.EqualTo(new JobSettings(CpuAffinityMask: 0x1, NumaNode: ushort.MaxValue)));
+
+        winver1.CloseMainWindow();
+        if (!winver1.WaitForExit(2000))
+        {
+            winver1.Kill();
+        }
+
+        Assert.That(await SharedApi.IsMonitorListening(cts.Token), Is.True);
+
+        winver2.CloseMainWindow();
+        if (!winver2.WaitForExit(2000))
+        {
+            winver2.Kill();
+        }
+
+        await procgov.WaitForExitAsync(cts.Token);
+
+        // give the monitor some time to process the process exit event
+        await Task.Delay(1000, cts.Token);
     }
 }

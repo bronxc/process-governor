@@ -197,11 +197,10 @@ static partial class Program
 
             async Task<string[]> GetProcessJobNames(uint[] processIds)
             {
-                buffer.ResetWrittenCount();
-
                 var jobNames = new string[processIds.Length];
                 for (int i = 0; i < jobNames.Length; i++)
                 {
+                    buffer.ResetWrittenCount();
                     MessagePackSerializer.Serialize<IMonitorRequest>(buffer, new GetJobNameReq(processIds[i]), cancellationToken: ct);
                     await pipe.WriteAsync(buffer.WrittenMemory, ct);
 
