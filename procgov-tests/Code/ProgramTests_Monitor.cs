@@ -29,6 +29,26 @@ public static partial class ProgramTests
     }
 
     [Test]
+    public static async Task MonitorNoProcessStarted()
+    {
+        using var cts = new CancellationTokenSource(10000);
+
+        var monitorTask = Task.Run(() => Program.Execute(new RunAsMonitor(), cts.Token));
+
+        using var pipe = new NamedPipeClientStream(".", Program.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+
+        // is monitor already running?
+        while (!pipe.IsConnected && !cts.IsCancellationRequested)
+        {
+            try { await pipe.ConnectAsync(cts.Token); } catch { }
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(Program.MaxMonitorIdleTimeInSeconds + 1), cts.Token);
+
+        Assert.That(monitorTask.IsCompletedSuccessfully);
+    }
+
+    [Test]
     public static async Task MonitorStartExitProcessEvents()
     {
         using var cts = new CancellationTokenSource(10000);
@@ -72,7 +92,7 @@ public static partial class ProgramTests
 
 
     [Test]
-    public static async Task StartExitProcessWithoutMonitoring()
+    public static async Task MonitorStartExitProcessWithoutMonitoring()
     {
         using var cts = new CancellationTokenSource(10000);
 
@@ -213,8 +233,7 @@ public static partial class ProgramTests
                     Assert.That(jobLimit.ExceededLimit, Is.EqualTo(LimitType.Memory));
                     Assert.That(jobLimit.JobName, Is.EqualTo(job.Name));
 
-                    // The job does not allow more processes to be created and is still active. Therefore,
-                    // we need to stop the monitor manually.
+                    // The job is still active. Therefore, we need to stop the monitor manually.
                     cts.Cancel();
                     break;
                 default:

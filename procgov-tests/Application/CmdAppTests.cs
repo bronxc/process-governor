@@ -49,7 +49,7 @@ public static class CmdAppTests
         await procgov.WaitForExitAsync(cts.Token);
 
         // give the monitor some time to process the process exit event
-        await Task.Delay(1000, cts.Token);
+        await Task.Delay(TimeSpan.FromSeconds(Program.MaxMonitorIdleTimeInSeconds + 1), cts.Token);
 
         Assert.That(await SharedApi.IsMonitorListening(cts.Token), Is.False);
     }
@@ -113,7 +113,7 @@ public static class CmdAppTests
         }
 
         // give the monitor some time to process the process exit event
-        await Task.Delay(1000, cts.Token);
+        await Task.Delay(TimeSpan.FromSeconds(Program.MaxMonitorIdleTimeInSeconds + 1), cts.Token);
 
         Assert.That(await SharedApi.IsMonitorListening(cts.Token), Is.False);
     }
@@ -163,7 +163,7 @@ public static class CmdAppTests
         }
 
         // give the monitor some time to process the process exit event
-        await Task.Delay(1000, cts.Token);
+        await Task.Delay(TimeSpan.FromSeconds(Program.MaxMonitorIdleTimeInSeconds + 1), cts.Token);
 
         Assert.That(await SharedApi.IsMonitorListening(cts.Token), Is.False);
     }
@@ -213,6 +213,8 @@ public static class CmdAppTests
         await procgov.WaitForExitAsync(cts.Token);
 
         // give the monitor some time to process the process exit event
-        await Task.Delay(1000, cts.Token);
+        await Task.Delay(TimeSpan.FromSeconds(Program.MaxMonitorIdleTimeInSeconds + 1), cts.Token);
+
+        Assert.That(await SharedApi.IsMonitorListening(cts.Token), Is.False);
     }
 }

@@ -15,6 +15,7 @@ namespace ProcessGovernor;
 
 static partial class Program
 {
+    public const int MaxMonitorIdleTimeInSeconds = 5;
     // main pipe used to receive commands from the client and respond to them
     public static readonly string PipeName = Environment.IsPrivilegedProcess ?
         "procgov-system" : "procgov-user";
@@ -194,9 +195,20 @@ static partial class Program
         void IOCPListener()
         {
             var buffer = new ArrayBufferWriter<byte>(1024);
+            var lastTimeWithJobs = DateTime.UtcNow;
 
             while (!cts.IsCancellationRequested)
             {
+                if (monitoredJobs.Count > 0)
+                {
+                    lastTimeWithJobs = DateTime.UtcNow;
+                }
+                else if ((DateTime.UtcNow - lastTimeWithJobs).TotalSeconds > MaxMonitorIdleTimeInSeconds)
+                {
+                    Logger.TraceInformation($"[process monitor] stopping monitor (no more jobs)");
+                    cts.Cancel();
+                }
+
                 unsafe
                 {
                     if (!PInvoke.GetQueuedCompletionStatus(iocpHandle, out uint msgIdentifier,
@@ -236,8 +248,6 @@ static partial class Program
 
                     Logger.TraceInformation($"[process monitor] {jobEvent}");
 
-                    bool stopMonitor = false;
-
                     switch (jobEvent)
                     {
                         case NewProcessEvent { ProcessId: var processId }:
@@ -247,7 +257,7 @@ static partial class Program
                             processes.ProcessExited(processId);
                             break;
                         case NoProcessesInJobEvent:
-                            stopMonitor = monitoredJobs.RemoveJob(jobHandle) == 0; // no more jobs to monitor
+                            monitoredJobs.RemoveJob(jobHandle);
                             break;
                     }
 
@@ -277,12 +287,6 @@ static partial class Program
                             completedTasksCount++;
                         }
                         buffer.ResetWrittenCount();
-                    }
-
-                    if (stopMonitor)
-                    {
-                        Logger.TraceInformation($"[process monitor] stopping monitor (no more jobs)");
-                        cts.Cancel();
                     }
                 }
             }
@@ -418,6 +422,14 @@ static partial class Program
                     jobData.Job.Dispose();
                 }
                 return monitoredJobs.Count;
+            }
+        }
+
+        public int Count
+        {
+            get
+            {
+                lock (lck) { return monitoredJobs.Count; }
             }
         }
 
