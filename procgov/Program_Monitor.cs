@@ -22,9 +22,6 @@ static partial class Program
 
     public static async Task<int> Execute(RunAsMonitor _, CancellationToken ct)
     {
-        // currently, we use the DefaultTraceListener, but I plan to switch to ETW-based EventSource
-        Program.Logger.Listeners.Add(new DefaultTraceListener());
-
         try
         {
             await StartMonitor(ct);

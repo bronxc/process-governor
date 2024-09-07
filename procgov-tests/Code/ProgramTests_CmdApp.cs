@@ -164,9 +164,4 @@ public static partial class ProgramTests
 
         UpdateProcessEnvironmentVariables(proc);
     }
-
-    /* FIXME: tests to implement:
-     * - 64-bit starting 32-bit
-     * - setting priorities
-     */
 }

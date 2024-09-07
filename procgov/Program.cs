@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel;
 using System.Diagnostics;
+using System.Diagnostics.Tracing;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -20,6 +21,8 @@ static partial class Program
 
         // we don't want any default trace listeners
         Logger.Listeners.Clear();
+        // only our ETW listener
+        Logger.Listeners.Add(new EtwTraceListener());
 
         try
         {
@@ -227,9 +230,9 @@ static partial class Program
                     jobSettings, environment, privileges, executable, serviceInstallPath, serviceUserName, serviceUserPassword),
                 ([var executable], [], false, false, false, true, false) => new RemoveProcessGovernance(executable, serviceInstallPath),
                 ([], [], false, false, false, false, true) => new RemoveAllProcessGovernance(serviceInstallPath),
-                (_, [], false, false, false, false, false) =>
+                (_, [], false, false, false, false, false) when procargs.Count > 0 =>
                     new RunAsCmdApp(jobSettings, new LaunchProcess(procargs, newConsole), environment, privileges, launchConfig, exitBehavior),
-                ([], _, false, false, false, false, false) =>
+                ([], _, false, false, false, false, false) when pids.Length > 0 =>
                     new RunAsCmdApp(jobSettings, new AttachToProcess(pids), environment, privileges, launchConfig, exitBehavior),
                 _ => throw new ArgumentException("invalid arguments provided")
             };
@@ -428,4 +431,31 @@ static partial class Program
             return result;
         }
     }
+
+    sealed class EtwTraceListener : TraceListener
+    {
+        public override void Write(string? message)
+        {
+            if (message is not null)
+            {
+                ProcgovEventSource.Instance.Log(message);
+            }
+        }
+
+        public override void WriteLine(string? message)
+        {
+            Write(message);
+        }
+    }
+}
+
+[EventSource(Name = "LowLevelDesign-ProcessGovernor")]
+class ProcgovEventSource : EventSource
+{
+    public static readonly ProcgovEventSource Instance = new();
+
+    private ProcgovEventSource() { }
+
+    [Event(1, Message = "{0}", Level = EventLevel.Informational, Keywords = EventKeywords.None)]
+    public void Log(string message) => WriteEvent(1, message);
 }

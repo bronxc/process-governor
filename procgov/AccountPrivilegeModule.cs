@@ -53,11 +53,11 @@ internal unsafe static class AccountPrivilegeModule
                 var privileges = new TOKEN_PRIVILEGES
                 {
                     PrivilegeCount = 1,
-                    Privileges = new() { _0 = new LUID_AND_ATTRIBUTES { Luid = luid, Attributes = TOKEN_PRIVILEGES_ATTRIBUTES.SE_PRIVILEGE_ENABLED } }
+                    Privileges = new() { e0 = new LUID_AND_ATTRIBUTES { Luid = luid, Attributes = TOKEN_PRIVILEGES_ATTRIBUTES.SE_PRIVILEGE_ENABLED } }
                 };
                 var previousPrivileges = new TOKEN_PRIVILEGES();
                 uint length = 0;
-                var result = PInvoke.AdjustTokenPrivileges(tokenHandle, false, privileges, (uint)Marshal.SizeOf(previousPrivileges), &previousPrivileges, &length);
+                var result = PInvoke.AdjustTokenPrivileges(tokenHandle, false, &privileges, (uint)Marshal.SizeOf(previousPrivileges), &previousPrivileges, &length);
                 var lastWin32Error = Marshal.GetLastWin32Error();
 
                 return result ? new AccountPrivilege(privilegeName, lastWin32Error, previousPrivileges) :
@@ -79,8 +79,12 @@ internal unsafe static class AccountPrivilegeModule
             {
                 // we need ToList to make sure that the tokenHandle is disposed after we adjust the privileges
                 return privileges.Where(priv => priv.Result == (int)WIN32_ERROR.NO_ERROR).Select(
-                    priv => PInvoke.AdjustTokenPrivileges(tokenHandle, false, priv.ReplacedPrivilege, 0, null, null) ?
-                        (priv.PrivilegeName, (int)WIN32_ERROR.NO_ERROR) : (priv.PrivilegeName, Marshal.GetLastWin32Error())).ToList();
+                    priv =>
+                    {
+                        var replacedPrivilege = priv.ReplacedPrivilege;
+                        return PInvoke.AdjustTokenPrivileges(tokenHandle, false, &replacedPrivilege, 0, null, null) ?
+                            (priv.PrivilegeName, (int)WIN32_ERROR.NO_ERROR) : (priv.PrivilegeName, Marshal.GetLastWin32Error());
+                    }).ToList();
             }
             finally
             {

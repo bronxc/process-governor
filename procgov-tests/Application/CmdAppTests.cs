@@ -10,10 +10,13 @@ namespace ProcessGovernor.Tests.Application;
 public static class CmdAppTests
 {
     [Test]
-    public static async Task LaunchProcess()
+    public static async Task LaunchProcess(
+        [Values(
+            Environment.SpecialFolder.System,
+            Environment.SpecialFolder.SystemX86)
+        ]Environment.SpecialFolder systemFolder)
     {
-        const string executablePath = "winver.exe";
-
+        string executablePath = Path.Combine(Environment.GetFolderPath(systemFolder), "winver.exe");
         using var cts = new CancellationTokenSource(60000);
 
         var procgovExecutablePath = Path.Combine(AppContext.BaseDirectory, "procgov.exe");
@@ -55,9 +58,13 @@ public static class CmdAppTests
     }
 
     [Test]
-    public static async Task LaunchProcessNoWaitAndUpdate()
+    public static async Task LaunchProcessNoWaitAndUpdate(
+        [Values(
+            Environment.SpecialFolder.System,
+            Environment.SpecialFolder.SystemX86)
+        ]Environment.SpecialFolder systemFolder)
     {
-        const string executablePath = "winver.exe";
+        string executablePath = Path.Combine(Environment.GetFolderPath(systemFolder), "winver.exe");
 
         using var cts = new CancellationTokenSource(60000);
 
@@ -119,9 +126,13 @@ public static class CmdAppTests
     }
 
     [Test]
-    public static async Task AttachToProcess()
+    public static async Task AttachToProcess(
+        [Values(
+            Environment.SpecialFolder.System,
+            Environment.SpecialFolder.SystemX86)
+        ]Environment.SpecialFolder systemFolder)
     {
-        const string executablePath = "winver.exe";
+        string executablePath = Path.Combine(Environment.GetFolderPath(systemFolder), "winver.exe");
 
         using var cts = new CancellationTokenSource(60000);
 
@@ -169,9 +180,13 @@ public static class CmdAppTests
     }
 
     [Test]
-    public static async Task AttachToMultipleProcesses()
+    public static async Task AttachToMultipleProcesses(
+        [Values(
+            Environment.SpecialFolder.System,
+            Environment.SpecialFolder.SystemX86)
+        ]Environment.SpecialFolder systemFolder)
     {
-        const string executablePath = "winver.exe";
+        string executablePath = Path.Combine(Environment.GetFolderPath(systemFolder), "winver.exe");
 
         using var cts = new CancellationTokenSource(60000);
 
