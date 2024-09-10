@@ -23,7 +23,7 @@
         </EventProvider>
         <EventProvider Id="DotNetRuntime" Name="e13c0d23-ccbc-4e12-931b-d9cc2eee27e4" NonPagedMemory="true" Level="5">
             <Keywords>
-                <Keyword Value="0x68098" />
+                <Keyword Value="0x40068098" />
             </Keywords>
         </EventProvider>
         <EventProvider Id="DotNetRuntime_CaptureState" Name="e13c0d23-ccbc-4e12-931b-d9cc2eee27e4" NonPagedMemory="true" Level="5" CaptureStateOnly="true">
