@@ -78,7 +78,7 @@ static partial class Program
                    --env=                  A text file with environment variables (each line in form: VAR=VAL).
                 -n|--node=                 The preferred NUMA node for the process.
                 -c|--cpu=                  If in hex (starts with 0x) it is treated as an affinity mask, otherwise it is a number of CPU cores assigned to your app. If you also provide the NUMA node, this setting will apply only to this node.",
-                -e|--cpurate=              The maximum CPU rate in % for the process. If you also set the affinity, he rate will apply only to the selected CPU cores. (Windows 8.1+)
+                -e|--cpurate=              The maximum CPU rate in % for the process. If you also set the affinity, the rate will apply only to the selected CPU cores. (Windows 8.1+)
                 -b|--bandwidth=            The maximum bandwidth (in bytes) for the process outgoing network traffic (accepted suffixes: K, M, or G). (Windows 10+)
                 -r|--recursive             Apply limits to child processes too (will wait for all processes to finish).
                    --newconsole            Start the process in a new console window.
@@ -189,15 +189,29 @@ static partial class Program
             var showHelp = parsedArgs.Remove("h") || parsedArgs.Remove("?") || parsedArgs.Remove("help");
 
             var environment = parsedArgs.Remove("env", out v) ? GetCustomEnvironmentVariables(v[^1]) : [];
+
             var privileges = parsedArgs.Remove("enable-privilege", out v) ? v : [];
+            if (parsedArgs.Remove("enable-privileges", out v)) // legacy name of this argument
+            {
+                privileges = [.. privileges, .. v];
+            }
+            // recommended way is to use the parameter multiple times, but for legacy reasons
+            // we also support comma-separated list
+            privileges = privileges.SelectMany(p => p.Split(',', StringSplitOptions.RemoveEmptyEntries)).ToList();
+
             var newConsole = parsedArgs.Remove("newconsole");
 
             var procargs = parsedArgs.Remove("", out v) ? v : [];
-            var pids = parsedArgs.Remove("p", out v) ? v.Select(uint.Parse).Distinct().ToArray() : [];
+
+            var pidsToParse = parsedArgs.Remove("p", out v) ? v : [];
             if (parsedArgs.Remove("pid", out v))
             {
-                pids = pids.Union(v.Select(uint.Parse)).ToArray();
+                pidsToParse = pidsToParse.Union(v).ToList();
             }
+            // recommended way is to use the parameter multiple times, but for legacy reasons
+            // we also support comma-separated list
+            var pids = pidsToParse.SelectMany(p => p.Split(
+                ',', StringSplitOptions.RemoveEmptyEntries)).Select(uint.Parse).Distinct().ToArray();
 
             var runAsMonitor = parsedArgs.Remove("monitor");
             var runAsService = parsedArgs.Remove("service");

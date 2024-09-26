@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using System.IO;
 
 namespace ProcessGovernor.Tests.Code;
@@ -27,6 +29,20 @@ public static partial class ProgramTests
         }
 
         switch (Program.ParseArgs(["-m=10M", "-p", "1001", "-p=1002", "--pid=1003", "--pid", "1004"]))
+        {
+            case RunAsCmdApp { JobTarget: var target, JobSettings.MaxProcessMemory: var maxMemory }:
+                Assert.That(maxMemory, Is.EqualTo(10 * 1024 * 1024));
+                Assert.That(target is AttachToProcess { Pids: var pids } ? pids : null,
+                    Is.EqualTo(new[] { 1001, 1002, 1003, 1004 }));
+                break;
+            default:
+                Assert.Fail();
+                break;
+        }
+
+
+        // legacy, undocumented behavior
+        switch (Program.ParseArgs(["-m=10M", "-p=1001,1002", "--pid=1003,1004"]))
         {
             case RunAsCmdApp { JobTarget: var target, JobSettings.MaxProcessMemory: var maxMemory }:
                 Assert.That(maxMemory, Is.EqualTo(10 * 1024 * 1024));
@@ -100,7 +116,7 @@ public static partial class ProgramTests
                 break;
         }
 
-        switch (Program.ParseArgs(["--install", "--service-username=testu", "--service-password=testp", 
+        switch (Program.ParseArgs(["--install", "--service-username=testu", "--service-password=testp",
             "--service-path=C:\\test test", "-m=10M", "test.exe"]))
         {
             case SetupProcessGovernance procgov:
@@ -333,6 +349,25 @@ public static partial class ProgramTests
                 File.Delete(envVarsFile);
             }
         }
+    }
+
+    [Test]
+    public static void ParseArgsEnablePrivileges()
+    {
+        if (Program.ParseArgs(["--enable-privilege=TEST1", "--enable-privilege=TEST2", "test.exe"]) is RunAsCmdApp
+            { Privileges: var privs })
+        {
+            Assert.That(privs, Is.EquivalentTo(new[] { "TEST1", "TEST2" }));
+        }
+        else { Assert.Fail(); }
+
+        // legacy, undocumented behavior
+        if (Program.ParseArgs(["--enable-privileges=TEST1,TEST2", "test.exe"]) is RunAsCmdApp
+            { Privileges: var legacyPrivs })
+        {
+            Assert.That(legacyPrivs, Is.EquivalentTo(new[] { "TEST1", "TEST2" }));
+        }
+        else { Assert.Fail(); }
     }
 
     [Test]
