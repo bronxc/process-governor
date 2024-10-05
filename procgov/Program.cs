@@ -40,7 +40,7 @@ static partial class Program
         }
         catch (Win32Exception ex)
         {
-            Console.Error.WriteLine($"ERROR: 0x{ex.ErrorCode:X} Win32 error");
+            Console.Error.WriteLine($"WIN32 ERROR: 0x{ex.ErrorCode:X}");
             Console.Error.WriteLine($"{ex}");
             return 0xff;
         }
@@ -87,6 +87,7 @@ static partial class Program
                    --install               Install procgov as a service which monitors a specific process.
                 -t|--timeout=              Kill the process (with -r, also all its children) if it does not finish within the specified time. Add suffix to define the time unit. Valid suffixes are: ms, s, m, h.
                    --process-utime=        Kill the process (with -r, also applies to its children) if it exceeds the given user-mode execution time. Add suffix to define the time unit. Valid suffixes are: ms, s, m, h.
+                   --priority=             Sets the process priority class of monitored processes. Possible values: Idle, BelowNormal, Normal, AboveNormal, High, RealTime.
                    --job-utime=            Kill the process (with -r, also all its children) if the total user-mode execution time exceed the specified value. Add suffix to define the time unit. Valid suffixes are: ms, s, m, h.
                    --uninstall             Uninstall procgov for a specific process.
                    --uninstall-all         Uninstall procgov completely (removing all saved process settings)
@@ -155,7 +156,9 @@ static partial class Program
                     parsedArgs.Remove("r") || parsedArgs.Remove("recursive"),
                 NumaNode:
                     parsedArgs.Remove("n", out v) || parsedArgs.Remove("node", out v) ? ushort.Parse(v[^1]) : ushort.MaxValue,
-                ActiveProcessLimit: 0 // not yet available in command line
+                ActiveProcessLimit: 0, // not yet available in command line
+                PriorityClass:
+                    parsedArgs.Remove("priority", out v) ? Enum.Parse<PriorityClass>(v[^1], ignoreCase: true) : PriorityClass.Undefined
             );
 
             if (jobSettings.MaxWorkingSetSize != jobSettings.MinWorkingSetSize &&

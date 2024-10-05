@@ -16,6 +16,7 @@ DuplicateTokenEx
 EnumProcessModulesEx
 GetConsoleWindow
 GetCurrentProcess
+GetCurrentThread
 GetExitCodeProcess
 GetExitCodeThread
 GetModuleFileNameEx
@@ -31,6 +32,7 @@ NtQueryInformationProcess
 OpenJobObject
 OpenProcess
 OpenProcessToken
+OpenThreadToken
 OpenSCManager
 OpenService
 ResumeThread
@@ -96,3 +98,5 @@ SERVICE_QUERY_STATUS
 SERVICE_START_TYPE
 WIN32_ERROR
 WAIT_EVENT
+PROCESS_CREATION_FLAGS
+

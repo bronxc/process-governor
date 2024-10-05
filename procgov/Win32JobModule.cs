@@ -168,6 +168,20 @@ static class Win32JobModule
             limitInfo.BasicLimitInformation.ActiveProcessLimit = session.ActiveProcessLimit;
         }
 
+        if (session.PriorityClass != PriorityClass.Undefined)
+        {
+            if (session.PriorityClass == PriorityClass.AboveNormal || session.PriorityClass == PriorityClass.High ||
+                session.PriorityClass == PriorityClass.Realtime)
+            {
+                // we need to acquire the SE_INC_BASE_PRIORITY_NAME privilege to set the priority class to AboveNormal, High or Realtime
+                AccountPrivilegeModule.EnableProcessPrivileges(PInvoke.GetCurrentProcess_SafeHandle(), [("SeIncreaseBasePriorityPrivilege", true)]);
+            }
+
+            flags |= JOB_OBJECT_LIMIT.JOB_OBJECT_LIMIT_PRIORITY_CLASS;
+            Debug.Assert(Enum.IsDefined(session.PriorityClass));
+            limitInfo.BasicLimitInformation.PriorityClass = (uint)session.PriorityClass;
+        }
+
         if (flags != 0)
         {
             limitInfo.BasicLimitInformation.LimitFlags = flags;

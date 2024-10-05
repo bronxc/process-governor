@@ -1,7 +1,9 @@
 ﻿using MessagePack;
 using System.Buffers;
+using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.WindowsAndMessaging;
@@ -26,128 +28,166 @@ static partial class Program
             ShowHeader();
         }
 
+        // We can't enforce clock time limit without waiting for job completion
+        Debug.Assert(!(app.ExitBehavior == ExitBehavior.DontWaitForJobCompletion && app.JobSettings.ClockTimeLimitInMilliseconds == 0));
+
         var buffer = new ArrayBufferWriter<byte>(1024);
 
-        using var _ = new ScopedAccountPrivileges(["SeDebugPrivilege"]);
-
-        var (targetProcesses, environmentVariablesToSet) = app.JobTarget switch
-        {
-            AttachToProcess { Pids: var pids } => (pids.Select(
-                pid => ProcessModule.OpenProcess(pid, app.Environment.Count != 0)).ToArray(), app.Environment),
-            LaunchProcess l => ([ProcessModule.CreateSuspendedProcess(l.Procargs, l.NewConsole, app.Environment)], []),
-            _ => throw new ArgumentException("invalid job target")
-        };
+        AccountPrivilegeModule.EnableProcessPrivileges(PInvoke.GetCurrentProcess_SafeHandle(), [("SeDebugPrivilege", false)]);
 
         using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-
         var noMonitor = app.LaunchConfig.HasFlag(LaunchConfig.NoMonitor);
         if (!noMonitor)
         {
             await SetupMonitorConnection();
         }
 
-        using var job = await SetupProcessGovernorJob();
-
-        foreach (var targetProcess in targetProcesses)
+        if (app.JobTarget is LaunchProcess l)
         {
-            ProcessModule.SetProcessEnvironmentVariables(targetProcess.Handle, environmentVariablesToSet);
+            using var targetProcess = ProcessModule.CreateSuspendedProcess(l.Procargs, l.NewConsole, app.Environment);
 
-            foreach (var accountPrivilege in AccountPrivilegeModule.EnablePrivileges(targetProcess.Handle, app.Privileges).Where(
-                ap => ap.Result != (int)WIN32_ERROR.NO_ERROR))
+            SetupProcessPrivileges(targetProcess);
+
+            using var job = await CreateJobOrTerminateProcess();
+
+            CheckWin32Result(PInvoke.ResumeThread(targetProcess.MainThreadHandle));
+
+            if (app.ExitBehavior != ExitBehavior.DontWaitForJobCompletion)
             {
-                Logger.TraceEvent(TraceEventType.Error, 0, $"Setting privilege {accountPrivilege.PrivilegeName} for process " +
-                    $"{targetProcess.Id} failed - 0x{accountPrivilege.Result:x}");
+                await WaitForJobCompletion(job);
             }
 
-            if (!targetProcess.MainThreadHandle.IsInvalid)
-            {
-                Debug.Assert(app.JobTarget is LaunchProcess);
-                CheckWin32Result(PInvoke.ResumeThread(targetProcess.MainThreadHandle));
-            }
-        }
+            return PInvoke.GetExitCodeProcess(targetProcess.Handle, out var rc) ? (int)rc : 0;
 
-        uint exitCode = 0;
-        if (app.ExitBehavior != ExitBehavior.DontWaitForJobCompletion)
-        {
-            if (!quiet)
+            async Task<Win32Job> CreateJobOrTerminateProcess()
             {
-                if (app.ExitBehavior == ExitBehavior.TerminateJobOnExit)
+                try
                 {
-                    Console.WriteLine("Press Ctrl-C to end execution and terminate the job.");
+                    return await SetupProcessGovernorJob([targetProcess]);
                 }
-                else
+                catch
                 {
-                    Console.WriteLine("Press Ctrl-C to end execution without terminating the process.");
+                    PInvoke.TerminateProcess(targetProcess.Handle, uint.MaxValue /* -1 */);
+                    throw;
                 }
-                Console.WriteLine();
             }
-
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            if (app.JobSettings.ClockTimeLimitInMilliseconds > 0)
-            {
-                cts.CancelAfter((int)app.JobSettings.ClockTimeLimitInMilliseconds);
-            }
-
-            if (noMonitor)
-            {
-                Win32JobModule.WaitForTheJobToComplete(job, cts.Token);
-            }
-            else
-            {
-                await MonitorJobUntilCompletion(cts.Token);
-            }
-
-            if (ct.IsCancellationRequested && app.ExitBehavior == ExitBehavior.TerminateJobOnExit ||
-                !ct.IsCancellationRequested && cts.IsCancellationRequested && app.JobSettings.ClockTimeLimitInMilliseconds > 0)
-            {
-                Win32JobModule.TerminateJob(job, 0x1f);
-            }
-
-            exitCode = app.JobTarget is LaunchProcess ?
-                (PInvoke.GetExitCodeProcess(targetProcesses[0].Handle, out var rc) ? rc : 0) : 0;
         }
         else
         {
-            Debug.Assert(app.JobSettings.ClockTimeLimitInMilliseconds == 0);
-        }
+            Debug.Assert(app.JobTarget is AttachToProcess);
+            var targetProcesses = ((AttachToProcess)app.JobTarget).Pids.Select(pid => ProcessModule.OpenProcess(pid, app.Environment.Count != 0)).ToArray();
 
-        return (int)exitCode;
+            foreach (var targetProcess in targetProcesses)
+            {
+                ProcessModule.SetProcessEnvironmentVariables(targetProcess.Handle, app.Environment);
+
+                SetupProcessPrivileges(targetProcess);
+            }
+
+            using var job = await SetupProcessGovernorJob(targetProcesses);
+
+            if (app.ExitBehavior != ExitBehavior.DontWaitForJobCompletion)
+            {
+                await WaitForJobCompletion(job);
+            }
+
+            return 0;
+        }
 
         /* *** Helper functions to connect with the monitor *** */
 
-        async Task<Win32Job> SetupProcessGovernorJob()
+        async Task SetupMonitorConnection()
         {
-            // FIXME: moze lepiej bedzie zrobic ifa na app.NoMonitor i rozdzielic logike na dwa rozne bloki
-            string[] assignedJobNames = app.JobTarget switch
+            try { await pipe.ConnectAsync(10, ct); }
+            catch
             {
-                AttachToProcess { Pids: var pids } when !noMonitor => [.. await GetProcessJobNames(pids)],
-                _ => [.. Enumerable.Repeat("", targetProcesses.Length)], // includes Launch process and Attach to process without monitor
-            };
-            Debug.Assert(assignedJobNames.Length == targetProcesses.Length);
+                string args = Logger.Switch.Level == SourceLevels.Verbose ? "--monitor --verbose" : "--monitor";
+                using var _ = Process.Start(Environment.ProcessPath!, args);
 
-            var jobName = "";
-            var jobSettings = app.JobSettings;
-            if (!noMonitor && Array.FindIndex(assignedJobNames, jobName => jobName != "") is var monitoredProcessIndex && monitoredProcessIndex != -1)
-            {
-                jobName = assignedJobNames[monitoredProcessIndex];
-                jobSettings = MergeJobSettings(jobSettings, await GetProcessJobSettings(jobName));
-                // check if all assigned jobs are the same
-                if (Array.FindIndex(assignedJobNames, n => n != jobName && n != "") is var idx && idx != -1)
+                while (!pipe.IsConnected && !ct.IsCancellationRequested)
                 {
-                    throw new ArgumentException($"found ProcessGovernor job: {jobName}, but {targetProcesses[idx].Id} " +
-                        $"is assigned to a different Process Governor job ('{assignedJobNames[idx]}')");
+                    try
+                    {
+                        await pipe.ConnectAsync(100, ct);
+                        Logger.TraceEvent(TraceEventType.Verbose, 0, "Waiting for monitor to start...");
+                    }
+                    catch { }
                 }
             }
+        }
 
-            var job = jobName != "" ? Win32JobModule.OpenJob(jobName) : Win32JobModule.CreateJob(Win32JobModule.GetNewJobName());
-            try
+        void SetupProcessPrivileges(Win32Process proc)
+        {
+            foreach (var (privilegeName, isSuccess) in AccountPrivilegeModule.EnableProcessPrivileges(proc.Handle,
+                app.Privileges.Select(name => (name, Required: false)).ToList()).Where(ap => !ap.IsSuccess))
             {
-                if (!noMonitor)
-                {
-                    await StartOrUpdateMonitoring();
-                }
+                Logger.TraceEvent(TraceEventType.Error, 0, $"Setting privilege {privilegeName} for process {proc.Id} failed.");
+            }
+        }
+
+        async Task<Win32Job> SetupProcessGovernorJob(Win32Process[] targetProcesses)
+        {
+            var jobSettings = app.JobSettings;
+
+            if (noMonitor)
+            {
+                var job = Win32JobModule.CreateJob(Win32JobModule.GetNewJobName());
 
                 Win32JobModule.SetLimits(job, jobSettings);
+
+                Array.ForEach(targetProcesses, targetProcess => Win32JobModule.AssignProcess(job, targetProcess.Handle));
+
+                if (!quiet)
+                {
+                    ShowLimits(jobSettings);
+                }
+
+                return job;
+            }
+
+            if (app.JobTarget is LaunchProcess)
+            {
+                Debug.Assert(targetProcesses.Length == 1);
+
+                var job = Win32JobModule.CreateJob(Win32JobModule.GetNewJobName());
+
+                Win32JobModule.SetLimits(job, jobSettings);
+
+                await StartOrUpdateMonitoring(job);
+
+                Win32JobModule.AssignProcess(job, targetProcesses[0].Handle);
+
+                if (!quiet)
+                {
+                    ShowLimits(jobSettings);
+                }
+
+                return job;
+            }
+
+            Debug.Assert(app.JobTarget is AttachToProcess);
+            {
+                var assignedJobNames = await GetProcessJobNames(((AttachToProcess)app.JobTarget).Pids);
+                Debug.Assert(assignedJobNames.Length == targetProcesses.Length);
+
+                var jobName = "";
+                if (Array.FindIndex(assignedJobNames, jobName => jobName != "") is var monitoredProcessIndex && monitoredProcessIndex != -1)
+                {
+                    jobName = assignedJobNames[monitoredProcessIndex];
+                    jobSettings = MergeJobSettings(jobSettings, await GetProcessJobSettings(jobName));
+                    // check if all assigned jobs are the same
+                    if (Array.FindIndex(assignedJobNames, n => n != jobName && n != "") is var idx && idx != -1)
+                    {
+                        throw new ArgumentException($"found ProcessGovernor job: {jobName}, but {targetProcesses[idx].Id} " +
+                            $"is assigned to a different Process Governor job ('{assignedJobNames[idx]}')");
+                    }
+                }
+
+                var job = jobName != "" ? Win32JobModule.OpenJob(jobName) : Win32JobModule.CreateJob(Win32JobModule.GetNewJobName());
+
+                Win32JobModule.SetLimits(job, jobSettings);
+
+                await StartOrUpdateMonitoring(job);
 
                 // assign job to all the processes which do not have a job assigned
                 for (int i = 0; i < targetProcesses.Length; i++)
@@ -167,15 +207,10 @@ static partial class Program
 
                 return job;
             }
-            catch
-            {
-                job.Dispose();
-                throw;
-            }
 
             // helper methods
 
-            async Task StartOrUpdateMonitoring()
+            async Task StartOrUpdateMonitoring(Win32Job job)
             {
                 buffer.ResetWrittenCount();
                 bool subscribeToEvents = app.ExitBehavior != ExitBehavior.DontWaitForJobCompletion;
@@ -259,68 +294,87 @@ static partial class Program
             }
         }
 
-        async Task MonitorJobUntilCompletion(CancellationToken ct)
+        async Task WaitForJobCompletion(Win32Job job)
         {
-            try
+            if (!quiet)
             {
-                while (pipe.IsConnected && await pipe.ReadAsync(buffer.GetMemory(), ct) is var bytesRead && bytesRead > 0)
+                if (app.ExitBehavior == ExitBehavior.TerminateJobOnExit)
                 {
-                    buffer.Advance(bytesRead);
+                    Console.WriteLine("Press Ctrl-C to end execution and terminate the job.");
+                }
+                else
+                {
+                    Console.WriteLine("Press Ctrl-C to end execution without terminating the process.");
+                }
+                Console.WriteLine();
+            }
 
-                    var processedBytes = 0;
-                    while (processedBytes < buffer.WrittenCount)
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            if (app.JobSettings.ClockTimeLimitInMilliseconds > 0)
+            {
+                cts.CancelAfter((int)app.JobSettings.ClockTimeLimitInMilliseconds);
+            }
+
+            if (noMonitor)
+            {
+                Win32JobModule.WaitForTheJobToComplete(job, cts.Token);
+            }
+            else
+            {
+                await MonitorJobUntilCompletion(cts.Token);
+            }
+
+            if (ct.IsCancellationRequested && app.ExitBehavior == ExitBehavior.TerminateJobOnExit ||
+                !ct.IsCancellationRequested && cts.IsCancellationRequested && app.JobSettings.ClockTimeLimitInMilliseconds > 0)
+            {
+                Win32JobModule.TerminateJob(job, 0x1f);
+            }
+
+            // helper methods
+
+            async Task MonitorJobUntilCompletion(CancellationToken ct)
+            {
+                try
+                {
+                    while (pipe.IsConnected && await pipe.ReadAsync(buffer.GetMemory(), ct) is var bytesRead && bytesRead > 0)
                     {
-                        var notification = MessagePackSerializer.Deserialize<IMonitorResponse>(
-                            buffer.WrittenMemory[processedBytes..], out var deserializedBytes, ct);
+                        buffer.Advance(bytesRead);
 
-                        switch (notification)
+                        var processedBytes = 0;
+                        while (processedBytes < buffer.WrittenCount)
                         {
-                            case NewProcessEvent ev:
-                                Logger.TraceEvent(TraceEventType.Information, 11, $"New process {ev.ProcessId} in job.");
-                                break;
-                            case ExitProcessEvent ev:
-                                Logger.TraceEvent(TraceEventType.Information, 12, $"Process {ev.ProcessId} exited.");
-                                break;
-                            case JobLimitExceededEvent ev:
-                                Logger.TraceEvent(TraceEventType.Information, 13, $"Job limit '{ev.ExceededLimit}' exceeded.");
-                                break;
-                            case ProcessLimitExceededEvent:
-                                Logger.TraceEvent(TraceEventType.Information, 14, $"Process limit exceeded.");
-                                break;
-                            case NoProcessesInJobEvent:
-                                Logger.TraceEvent(TraceEventType.Information, 15, "No processes in job.");
-                                return;
+                            var notification = MessagePackSerializer.Deserialize<IMonitorResponse>(
+                                buffer.WrittenMemory[processedBytes..], out var deserializedBytes, ct);
+
+                            switch (notification)
+                            {
+                                case NewProcessEvent ev:
+                                    Logger.TraceEvent(TraceEventType.Information, 11, $"New process {ev.ProcessId} in job.");
+                                    break;
+                                case ExitProcessEvent ev:
+                                    Logger.TraceEvent(TraceEventType.Information, 12, $"Process {ev.ProcessId} exited.");
+                                    break;
+                                case JobLimitExceededEvent ev:
+                                    Logger.TraceEvent(TraceEventType.Information, 13, $"Job limit '{ev.ExceededLimit}' exceeded.");
+                                    break;
+                                case ProcessLimitExceededEvent:
+                                    Logger.TraceEvent(TraceEventType.Information, 14, $"Process limit exceeded.");
+                                    break;
+                                case NoProcessesInJobEvent:
+                                    Logger.TraceEvent(TraceEventType.Information, 15, "No processes in job.");
+                                    return;
+                            }
+
+                            processedBytes += deserializedBytes;
                         }
 
-                        processedBytes += deserializedBytes;
+                        buffer.ResetWrittenCount();
                     }
-
-                    buffer.ResetWrittenCount();
                 }
-            }
-            catch (Exception ex) when (ex is OperationCanceledException || (
-                    ex is AggregateException && ex.InnerException is TaskCanceledException))
-            {
-                Logger.TraceEvent(TraceEventType.Verbose, 0, "Stopping monitoring because of cancellation.");
-            }
-        }
-
-        async Task SetupMonitorConnection()
-        {
-            try { await pipe.ConnectAsync(10, ct); }
-            catch
-            {
-                string args = Logger.Switch.Level == SourceLevels.Verbose ? "--monitor --verbose" : "--monitor";
-                using var _ = Process.Start(Environment.ProcessPath!, args);
-
-                while (!pipe.IsConnected && !ct.IsCancellationRequested)
+                catch (Exception ex) when (ex is OperationCanceledException || (
+                        ex is AggregateException && ex.InnerException is TaskCanceledException))
                 {
-                    try
-                    {
-                        await pipe.ConnectAsync(100, ct);
-                        Logger.TraceEvent(TraceEventType.Verbose, 0, "Waiting for monitor to start...");
-                    }
-                    catch { }
+                    Logger.TraceEvent(TraceEventType.Verbose, 0, "Stopping monitoring because of cancellation.");
                 }
             }
         }

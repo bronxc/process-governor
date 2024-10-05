@@ -1,4 +1,6 @@
-﻿using System.Runtime.InteropServices;
+﻿using Microsoft.Win32.SafeHandles;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.Security;
@@ -6,95 +8,38 @@ using static ProcessGovernor.NtApi;
 
 namespace ProcessGovernor;
 
-internal record class AccountPrivilege(string PrivilegeName, int Result, TOKEN_PRIVILEGES ReplacedPrivilege);
-
-internal sealed class ScopedAccountPrivileges : IDisposable
-{
-    private readonly List<AccountPrivilege> accountPrivileges;
-
-    public ScopedAccountPrivileges(IEnumerable<string> privilegeNames)
-    {
-        var pid = (uint)Environment.ProcessId;
-        using var processHandle = PInvoke.GetCurrentProcess_SafeHandle();
-
-        accountPrivileges = AccountPrivilegeModule.EnablePrivileges(processHandle, privilegeNames);
-
-        foreach (var accountPrivilege in accountPrivileges.Where(ap => ap.Result != (int)WIN32_ERROR.NO_ERROR))
-        {
-            Program.Logger.TraceInformation($"Acquiring privilege {accountPrivilege.PrivilegeName} for process " +
-                $"{pid} failed - 0x{accountPrivilege.Result:x}");
-        }
-    }
-
-    public void Dispose()
-    {
-        var pid = (uint)Environment.ProcessId;
-        using var processHandle = PInvoke.GetCurrentProcess_SafeHandle();
-
-        foreach (var (privilegeName, winError) in AccountPrivilegeModule.RestorePrivileges(processHandle, accountPrivileges))
-        {
-            Program.Logger.TraceInformation($"Error while reverting the {privilegeName} privilege for process {pid}: 0x{winError:x}");
-        }
-    }
-}
-
 internal unsafe static class AccountPrivilegeModule
 {
-    internal static List<AccountPrivilege> EnablePrivileges(SafeHandle processHandle, IEnumerable<string> privilegeNames)
+    internal static List<(string PrivilegeName, bool IsSuccess)> EnableProcessPrivileges(SafeHandle processHandle, 
+        List<(string PrivilegeName, bool Required)> privileges)
     {
         CheckWin32Result(PInvoke.OpenProcessToken(processHandle, TOKEN_ACCESS_MASK.TOKEN_QUERY | TOKEN_ACCESS_MASK.TOKEN_ADJUST_PRIVILEGES,
             out var tokenHandle));
         try
         {
-            return privilegeNames.Select(privilegeName =>
+            return privileges.Select(privilege =>
             {
-                CheckWin32Result(PInvoke.LookupPrivilegeValue(null, privilegeName, out var luid));
+                CheckWin32Result(PInvoke.LookupPrivilegeValue(null, privilege.PrivilegeName, out var luid));
 
                 var privileges = new TOKEN_PRIVILEGES
                 {
                     PrivilegeCount = 1,
                     Privileges = new() { e0 = new LUID_AND_ATTRIBUTES { Luid = luid, Attributes = TOKEN_PRIVILEGES_ATTRIBUTES.SE_PRIVILEGE_ENABLED } }
                 };
-                var previousPrivileges = new TOKEN_PRIVILEGES();
-                uint length = 0;
-                var result = PInvoke.AdjustTokenPrivileges(tokenHandle, false, &privileges, (uint)Marshal.SizeOf(previousPrivileges), &previousPrivileges, &length);
+                PInvoke.AdjustTokenPrivileges(tokenHandle, false, &privileges, 0, null, null);
                 var lastWin32Error = Marshal.GetLastWin32Error();
 
-                return result ? new AccountPrivilege(privilegeName, lastWin32Error, previousPrivileges) :
-                    new AccountPrivilege(privilegeName, lastWin32Error, new TOKEN_PRIVILEGES { PrivilegeCount = 0 });
+                if (lastWin32Error != (int)WIN32_ERROR.NO_ERROR && privilege.Required)
+                {
+                    throw new Win32Exception(lastWin32Error);
+                }
+
+                return (privilege.PrivilegeName, lastWin32Error == (int)WIN32_ERROR.NO_ERROR);
             }).ToList();
         }
         finally
         {
             tokenHandle.Dispose();
-        }
-    }
-
-    // does not throw an exception
-    internal static IEnumerable<(string, int)> RestorePrivileges(SafeHandle processHandle, List<AccountPrivilege> privileges)
-    {
-        if (PInvoke.OpenProcessToken(processHandle, TOKEN_ACCESS_MASK.TOKEN_ADJUST_PRIVILEGES, out var tokenHandle))
-        {
-            try
-            {
-                // we need ToList to make sure that the tokenHandle is disposed after we adjust the privileges
-                return privileges.Where(priv => priv.Result == (int)WIN32_ERROR.NO_ERROR).Select(
-                    priv =>
-                    {
-                        var replacedPrivilege = priv.ReplacedPrivilege;
-                        return PInvoke.AdjustTokenPrivileges(tokenHandle, false, &replacedPrivilege, 0, null, null) ?
-                            (priv.PrivilegeName, (int)WIN32_ERROR.NO_ERROR) : (priv.PrivilegeName, Marshal.GetLastWin32Error());
-                    }).ToList();
-            }
-            finally
-            {
-                tokenHandle.Dispose();
-            }
-        }
-        else
-        {
-            int winerr = Marshal.GetLastWin32Error();
-            return [("ProcessToken", winerr)];
         }
     }
 }

@@ -371,6 +371,35 @@ public static partial class ProgramTests
     }
 
     [Test]
+    public static void ParseArgsPriorityClass()
+    {
+        var priorityClassNamesMap = new Dictionary<string, PriorityClass>()
+        {
+            ["Idle"] = PriorityClass.Idle,
+            ["Normal"] = PriorityClass.Normal,
+            ["AboveNormal"] = PriorityClass.AboveNormal,
+            ["BelowNormal"] = PriorityClass.BelowNormal,
+            ["High"] = PriorityClass.High,
+            ["Realtime"] = PriorityClass.Realtime,
+        };
+
+        foreach (var (exactName, pc) in priorityClassNamesMap)
+        {
+            foreach (var name in new[] { exactName, exactName.ToLowerInvariant() })
+            {
+                if (Program.ParseArgs([$"--priority={name}", "test.exe"]) is RunAsCmdApp
+                    {
+                        JobSettings.PriorityClass: var parsedPriorityClass
+                    })
+                {
+                    Assert.That(parsedPriorityClass, Is.EqualTo(pc));
+                }
+                else { Assert.Fail($"Failed parsing of priority {name}"); }
+            }
+        }
+    }
+
+    [Test]
     public static void ParseArgsUnknownArgument()
     {
         Assert.That(Program.ParseArgs(["-c", "1", "--maxmem", "100M", "--unknown", "test.exe"]) is ShowHelpAndExit
